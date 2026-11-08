@@ -323,8 +323,21 @@
 
                         <CheckBox Content="{DynamicResource Discord.Enabled}" IsChecked="{Binding Enabled}" />
                         <TextBlock Text="{DynamicResource Discord.AppId}" Style="{StaticResource Text.Label}" Margin="0,8,0,4" />
-                        <TextBox Text="{Binding ApplicationId, UpdateSourceTrigger=LostFocus}" FontFamily="Consolas" MaxLength="20" />
-                        <TextBlock Text="{DynamicResource Discord.AppIdHint}" Style="{StaticResource Text.Caption}" Margin="0,4,0,8" />
+                        <TextBlock Text="{Binding ApplicationId, Mode=OneTime}" FontFamily="Consolas" Foreground="{StaticResource Brush.TextMuted}" />
+                        <TextBlock Text="{Binding AssetText}" TextWrapping="Wrap" Margin="0,4,0,8">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock" BasedOn="{StaticResource Text.Caption}">
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding AssetsOk}" Value="True">
+                                            <Setter Property="Foreground" Value="{StaticResource Brush.Success}" />
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding AssetsMissing}" Value="True">
+                                            <Setter Property="Foreground" Value="{StaticResource Brush.Danger}" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
 
                         <CheckBox Content="{DynamicResource Discord.ShowNickname}" IsChecked="{Binding ShowNickname}" />
                         <TextBox Text="{Binding Nickname, UpdateSourceTrigger=LostFocus}" MaxLength="32" Margin="0,2,0,4"

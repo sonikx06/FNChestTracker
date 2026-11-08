@@ -462,13 +462,11 @@
     <s:String x:Key="Presence.TeamMatchChests">Team: {0} chests this match</s:String>
     <s:String x:Key="Presence.TeamLifetimeChests">Team: {0} chests total</s:String>
     <s:String x:Key="Presence.InLobby">In lobby</s:String>
-    <s:String x:Key="Presence.ModeTooltip">Tracking: {0}</s:String>
     <s:String x:Key="Discord.Title">Discord Rich Presence</s:String>
     <s:String x:Key="Discord.Preview">Status preview</s:String>
     <s:String x:Key="Discord.Playing">PLAYING</s:String>
     <s:String x:Key="Discord.Enabled">Show status in Discord</s:String>
     <s:String x:Key="Discord.AppId">Discord Application ID</s:String>
-    <s:String x:Key="Discord.AppIdHint">Application ID from the Discord Developer Portal (a public number, not a password or token). See the README.</s:String>
     <s:String x:Key="Discord.ShowNickname">Show nickname</s:String>
     <s:String x:Key="Discord.NicknameHint">Signed in to a server: your server name is shown. Otherwise this name is used; empty — “Player”.</s:String>
     <s:String x:Key="Discord.ShowTeam">Show team information</s:String>
@@ -506,4 +504,8 @@
     <s:String x:Key="Det.YoloConfidence">Minimum detection confidence</s:String>
     <s:String x:Key="Det.DebugView">Debug view: draw boxes and chest states in the preview</s:String>
     <s:String x:Key="Det.YoloStats">detections {0} · chests {1} ({2}) · other containers {3} · {4} ms</s:String>
+    <s:String x:Key="Discord.Assets.Checking">Checking the logo and badges in the Discord application…</s:String>
+    <s:String x:Key="Discord.Assets.Ok">Logo and badges found in the Discord application ({0}).</s:String>
+    <s:String x:Key="Discord.Assets.Missing">Missing art assets in the Discord application: {0}. Discord shows a “?” instead. Upload them under Developer Portal → Rich Presence → Art Assets with exactly these names.</s:String>
+    <s:String x:Key="Discord.Assets.Unavailable">Could not check the logo and badges ({0}). The status still works; Discord loads the images itself.</s:String>
 </ResourceDictionary>

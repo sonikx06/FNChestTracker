@@ -29,6 +29,9 @@ public sealed partial class DiscordViewModel : ObservableObject
     [ObservableProperty] private string? _previewButton;
     [ObservableProperty] private ImageSource? _previewSmallImage;
     [ObservableProperty] private string? _nicknameInfo;
+    [ObservableProperty] private string _assetText = "";
+    [ObservableProperty] private bool _assetsOk;
+    [ObservableProperty] private bool _assetsMissing;
 
     private static readonly ImageSource LogoImage = IconFactory.CreateBitmap(128);
     private static readonly ImageSource SoloImage = IconFactory.CreateBadge(64, team: false);
@@ -62,7 +65,8 @@ public sealed partial class DiscordViewModel : ObservableObject
 
     public bool Enabled { get => S.Enabled; set => Set(S.Enabled, value, v => S.Enabled = v, reconfigure: true); }
 
-    public string ApplicationId { get => S.ApplicationId; set => Set(S.ApplicationId, Digits(value), v => S.ApplicationId = v, reconfigure: true); }
+    /// <summary>Fixed Discord Application ID (read-only).</summary>
+    public string ApplicationId => DiscordApp.ApplicationId;
 
     public bool ShowNickname { get => S.ShowNickname; set => Set(S.ShowNickname, value, v => S.ShowNickname = v); }
 
@@ -102,7 +106,6 @@ public sealed partial class DiscordViewModel : ObservableObject
         else _coordinator?.Recompute();
     }
 
-    private static string Digits(string? s) => new((s ?? "").Where(char.IsAsciiDigit).ToArray());
 
     private void Refresh()
     {
@@ -115,6 +118,17 @@ public sealed partial class DiscordViewModel : ObservableObject
             PresenceStatus.Connected => svc.ConnectedUser is { } u ? Loc.F("Discord.Status.ConnectedAs", u) : Loc.T("Discord.Status.Connected"),
             PresenceStatus.Error => Loc.F("Discord.Status.Error", svc.LastError ?? "?"),
             _ => Loc.T("Discord.Status." + svc.Status),
+        };
+
+        var check = _coordinator.AssetCheck;
+        AssetsOk = check.Status == AssetCheckStatus.Ok;
+        AssetsMissing = check.Status == AssetCheckStatus.Missing;
+        AssetText = check.Status switch
+        {
+            AssetCheckStatus.Ok => Loc.F("Discord.Assets.Ok", string.Join(", ", DiscordApp.RequiredAssets)),
+            AssetCheckStatus.Missing => Loc.F("Discord.Assets.Missing", string.Join(", ", check.Missing)),
+            AssetCheckStatus.Unavailable => Loc.F("Discord.Assets.Unavailable", check.Error ?? "?"),
+            _ => Loc.T("Discord.Assets.Checking"),
         };
 
         var nick = _coordinator.Nickname;
@@ -136,7 +150,7 @@ public sealed partial class DiscordViewModel : ObservableObject
         PreviewLargeText = a.LargeText;
         PreviewSmallText = a.SmallText;
         PreviewButton = a.Buttons.FirstOrDefault()?.Label;
-        PreviewSmallImage = a.SmallImage == S.TeamImageKey ? TeamImage : SoloImage;
+        PreviewSmallImage = a.SmallImage == DiscordApp.TeamImageKey ? TeamImage : SoloImage;
         UpdateElapsed();
         if (a.Start is not null) _clock.Start(); else _clock.Stop();
     }

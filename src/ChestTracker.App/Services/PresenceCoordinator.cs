@@ -41,6 +41,29 @@ public sealed class PresenceCoordinator : IDisposable
 
     public bool FortniteRunning => _fortniteRunning;
 
+    /// <summary>Whether the art assets (logo/solo/team) exist in the Discord application.</summary>
+    public AssetCheckResult AssetCheck { get; private set; } = new(AssetCheckStatus.Unknown, [], []);
+
+    /// <summary>Checks the art asset keys against the Discord application (public asset list; only the app ID is sent).</summary>
+    public async Task CheckAssetsAsync()
+    {
+        var result = await new DiscordAssetChecker().CheckAsync(DiscordApp.ApplicationId, DiscordApp.RequiredAssets);
+        if (result.Status == AssetCheckStatus.Ok)
+        {
+            Log.Info($"Discord art assets found: {string.Join(", ", result.Found)}");
+        }
+        else
+        {
+            Log.Warn($"Discord art assets {result.Status}: missing [{string.Join(", ", result.Missing)}] found [{string.Join(", ", result.Found)}] {result.Error}");
+        }
+
+        await _dispatcher.InvokeAsync(() =>
+        {
+            AssetCheck = result;
+            Changed?.Invoke(this, EventArgs.Empty);
+        });
+    }
+
     /// <summary>The nickname used for the presence and where it came from (shown in the settings).</summary>
     public ResolvedNickname Nickname { get; private set; } = new(NicknameResolver.DefaultName, NicknameSource.Default);
 
@@ -51,7 +74,12 @@ public sealed class PresenceCoordinator : IDisposable
     public void ApplyConfiguration()
     {
         var d = _main.Services.Settings.Discord;
-        _service.Configure(d.Enabled, d.ApplicationId);
+        _service.Configure(d.Enabled, DiscordApp.ApplicationId);
+        if (d.Enabled && AssetCheck.Status is AssetCheckStatus.Unknown or AssetCheckStatus.Unavailable)
+        {
+            _ = CheckAssetsAsync();
+        }
+
         Recompute();
     }
 
@@ -108,10 +136,6 @@ public sealed class PresenceCoordinator : IDisposable
         TeamLifetimeChests = Loc.T("Presence.TeamLifetimeChests"),
         InLobby = Loc.T("Presence.InLobby"),
         LifetimeTooltip = Loc.T("Presence.LifetimeChests"),
-        ModeTooltip = Loc.T("Presence.ModeTooltip"),
-        ModeManual = Loc.T("Mode.Manual").ToLowerInvariant(),
-        ModeAutomatic = Loc.T("Mode.Automatic").ToLowerInvariant(),
-        ModeHybrid = Loc.T("Mode.Hybrid").ToLowerInvariant(),
         ButtonLabel = "GitHub",
         AppName = "Chest Tracker",
     };

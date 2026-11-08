@@ -222,8 +222,8 @@ mode changes, or your nickname changes.
   Unchanged statuses are never re-sent.
 - Texts are cut to Discord's limits: 2–128 characters, at most 2 buttons, labels of up to 32 characters, URLs of up
   to 512 characters.
-- If Discord is not running, the app retries every 15 s and reconnects after Discord restarts. An invalid Application
-  ID is shown as an error. Tracking never depends on Discord.
+- If Discord is not running, the app retries every 15 s and reconnects after Discord restarts. Tracking never depends
+  on Discord.
 
 **Settings → Discord Rich Presence:**
 - enable/disable
@@ -233,7 +233,7 @@ mode changes, or your nickname changes.
 - team info, match timer and lifetime count
 - main statistic
 - hide when Fortnite is not running
-- the GitHub button always links <https://github.com/sonikx06/FNChestTracker> (fixed, not a setting)
+- the GitHub button always links <https://github.com/sonikx06/FNChestTracker/> (fixed, not a setting)
 - a live preview of the status card
 
 **How it works.** The app talks to the Discord desktop client over its local RPC pipe (`\\.\pipe\discord-ipc-N`), using
@@ -241,24 +241,25 @@ only `HANDSHAKE` and `SET_ACTIVITY`. It never asks for or stores your Discord pa
 OAuth. The official Discord Social SDK is a native C++ SDK that requires a Developer Portal download. This app uses
 the documented local RPC transport for Rich Presence instead.
 
-### One-time Discord setup
+### Discord application (fixed)
 
-1. Open <https://discord.com/developers/applications>, click **New Application** and name it **Chest Tracker**. The
-   application name is what Discord shows as "Playing …".
-2. Copy the **Application ID** from *General Information*.
-3. Under **Rich Presence → Art Assets**, upload the three images in `assets/discord/` with these keys:
+The app always uses the Discord application **`1569001762663440454`** ("ChestTracker"). The ID, the GitHub button
+URL and the art asset keys are constants in `src/ChestTracker.Core/Presence/DiscordApp.cs`. They are not settings,
+and values saved by older versions in `settings.json` are ignored. New installs need no setup.
 
-   | File | Key |
-   |---|---|
-   | `logo.png` (1024×1024) | `logo` |
-   | `solo.png` | `solo` |
-   | `team.png` | `team` |
+The images are art assets of that application (**Developer Portal → Rich Presence → Art Assets**), referenced by key:
 
-   To regenerate the images, run `FortniteChestTracker.exe --export-discord-assets <dir>`. Newly uploaded assets can
-   take a few minutes to appear.
-4. In the app, open **Settings → Discord Rich Presence** and paste the Application ID. The Application ID is public;
-   it is not a secret.
-5. Distributors can pre-fill the ID in `settings.json` (`"Discord": { "ApplicationId": "…" }`).
+| File | Key | Used as |
+|---|---|---|
+| `assets/discord/logo.png` (1024×1024) | `logo` | large image |
+| `assets/discord/solo.png` | `solo` | small badge when playing solo |
+| `assets/discord/team.png` | `team` | small badge in a party |
+
+When Discord is enabled, the app checks these keys against Discord's public asset list for the application (only the
+public application ID is sent). **Settings → Discord Rich Presence** then shows either "found" or which keys are
+missing; a missing key is what makes Discord show a "?" placeholder. Newly uploaded assets can take a few minutes to
+appear, and the Discord client may cache the old image until it restarts. To regenerate the images, run
+`FortniteChestTracker.exe --export-discord-assets <dir>`.
 
 ## Overlay notes
 

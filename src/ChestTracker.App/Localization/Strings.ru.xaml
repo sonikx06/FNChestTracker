@@ -462,13 +462,11 @@
     <s:String x:Key="Presence.TeamMatchChests">Команда: {0} сундуков за матч</s:String>
     <s:String x:Key="Presence.TeamLifetimeChests">Команда: {0} сундуков всего</s:String>
     <s:String x:Key="Presence.InLobby">В лобби</s:String>
-    <s:String x:Key="Presence.ModeTooltip">Подсчёт: {0}</s:String>
     <s:String x:Key="Discord.Title">Discord Rich Presence</s:String>
     <s:String x:Key="Discord.Preview">Предпросмотр статуса</s:String>
     <s:String x:Key="Discord.Playing">ИГРАЕТ</s:String>
     <s:String x:Key="Discord.Enabled">Показывать статус в Discord</s:String>
     <s:String x:Key="Discord.AppId">Discord Application ID</s:String>
-    <s:String x:Key="Discord.AppIdHint">ID приложения из Discord Developer Portal (это публичный номер, не пароль и не токен). См. README.</s:String>
     <s:String x:Key="Discord.ShowNickname">Показывать ник</s:String>
     <s:String x:Key="Discord.NicknameHint">Если вы вошли на сервер, показывается имя с сервера. Иначе — это имя; пусто — «Player».</s:String>
     <s:String x:Key="Discord.ShowTeam">Показывать информацию о команде</s:String>
@@ -506,4 +504,8 @@
     <s:String x:Key="Det.YoloConfidence">Минимальная уверенность детекции</s:String>
     <s:String x:Key="Det.DebugView">Режим отладки: рамки и состояния сундуков в превью</s:String>
     <s:String x:Key="Det.YoloStats">детекций {0} · сундуков {1} ({2}) · других контейнеров {3} · {4} мс</s:String>
+    <s:String x:Key="Discord.Assets.Checking">Проверяем логотип и значки в приложении Discord…</s:String>
+    <s:String x:Key="Discord.Assets.Ok">Логотип и значки найдены в приложении Discord ({0}).</s:String>
+    <s:String x:Key="Discord.Assets.Missing">В приложении Discord нет изображений: {0}. Вместо них Discord показывает «?». Загрузите их в Developer Portal → Rich Presence → Art Assets точно с этими именами.</s:String>
+    <s:String x:Key="Discord.Assets.Unavailable">Не удалось проверить логотип и значки ({0}). Статус всё равно работает: Discord загружает картинки сам.</s:String>
 </ResourceDictionary>

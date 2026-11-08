@@ -1,4 +1,4 @@
-bin/
+﻿bin/
 obj/
 artifacts/
 publish/
@@ -6,7 +6,7 @@ publish/
 *.user
 *.suo
 TestResults/
-ChestTracker-Release/
+ChestTracker-Release*/
 ChestTracker-*.zip
 
 # Local portable PostgreSQL used for development and server tests

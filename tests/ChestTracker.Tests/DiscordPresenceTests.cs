@@ -30,7 +30,7 @@ public class PresenceBuilderTests
         Assert.Equal(Start, a.Start);
         Assert.Equal("logo", a.LargeImage);
         Assert.Equal("solo", a.SmallImage);
-        Assert.Equal("Tracking: manual", a.SmallText);
+        Assert.Equal("Fortnite Chest Tracker", a.SmallText);
         Assert.Equal(PresenceBuilder.ProjectUrl, Assert.Single(a.Buttons).Url);
     }
 
@@ -106,7 +106,7 @@ public class PresenceBuilderTests
 
         var button = Assert.Single(a.Buttons);
         Assert.Equal("GitHub", button.Label);
-        Assert.Equal("https://github.com/sonikx06/FNChestTracker", button.Url);
+        Assert.Equal("https://github.com/sonikx06/FNChestTracker/", button.Url);
         Assert.True(button.Url.Length <= PresenceBuilder.MaxButtonUrl);
     }
 
@@ -148,7 +148,7 @@ public class PresenceBuilderTests
         Assert.Equal("Solo", json["details"]!.GetValue<string>());
         Assert.Equal(Start.ToUnixTimeMilliseconds(), json["timestamps"]!["start"]!.GetValue<long>());
         Assert.Equal("logo", json["assets"]!["large_image"]!.GetValue<string>());
-        Assert.Equal("https://github.com/sonikx06/FNChestTracker", json["buttons"]![0]!["url"]!.GetValue<string>());
+        Assert.Equal("https://github.com/sonikx06/FNChestTracker/", json["buttons"]![0]!["url"]!.GetValue<string>());
     }
 }
 
@@ -170,6 +170,7 @@ public sealed class FakeDiscord : IAsyncDisposable
     public string? RejectWith { get; }
     public ConcurrentQueue<JsonNode?> Activities { get; } = new();
     public int Handshakes;
+    public ConcurrentQueue<string?> ClientIds { get; } = new();
 
     /// <summary>Drops the current client, like Discord restarting.</summary>
     public void Kick() => _current?.Dispose();
@@ -204,6 +205,7 @@ public sealed class FakeDiscord : IAsyncDisposable
         var (op, hello) = await Read(pipe);
         Assert.Equal(0, op);
         Interlocked.Increment(ref Handshakes);
+        ClientIds.Enqueue(hello?["client_id"]?.GetValue<string>());
         if (RejectWith is not null)
         {
             await Write(pipe, 2, new JsonObject { ["code"] = 4000, ["message"] = RejectWith });

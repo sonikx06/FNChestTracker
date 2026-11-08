@@ -60,11 +60,6 @@ public sealed record PresenceTexts
     public string InLobby { get; init; } = "In lobby";
     /// <summary>{0} lifetime count.</summary>
     public string LifetimeTooltip { get; init; } = "{0} chests lifetime";
-    /// <summary>{0} mode name.</summary>
-    public string ModeTooltip { get; init; } = "Tracking: {0}";
-    public string ModeManual { get; init; } = "manual";
-    public string ModeAutomatic { get; init; } = "automatic";
-    public string ModeHybrid { get; init; } = "hybrid";
     public string ButtonLabel { get; init; } = "GitHub";
     public string AppName { get; init; } = "Chest Tracker";
 }
@@ -84,7 +79,7 @@ public static class PresenceBuilder
     public const int MaxButtons = 2;
 
     /// <summary>The project page shown as the presence button. Fixed: it is not a setting.</summary>
-    public const string ProjectUrl = "https://github.com/sonikx06/FNChestTracker";
+    public const string ProjectUrl = DiscordApp.ProjectUrl;
 
     /// <returns>The activity to show, or null when the presence should be cleared.</returns>
     public static PresenceActivity? Build(PresenceContext c, DiscordSettings s, PresenceTexts t)
@@ -101,13 +96,6 @@ public static class PresenceBuilder
         var nickname = s.ShowNickname ? Clean(c.Nickname) : null;
         var state = string.IsNullOrEmpty(nickname) ? stat : $"{nickname} • {stat}";
 
-        var mode = c.Mode switch
-        {
-            TrackingMode.Automatic => t.ModeAutomatic,
-            TrackingMode.Hybrid => t.ModeHybrid,
-            _ => t.ModeManual,
-        };
-
         var largeText = s.ShowLifetime
             ? $"{t.AppName} • {string.Format(CultureInfo.InvariantCulture, t.LifetimeChests.Replace("{0}", "{0:N0}"), c.LifetimeCount)}"
             : t.AppName;
@@ -117,10 +105,10 @@ public static class PresenceBuilder
             Details = Fit(details),
             State = Fit(state),
             Start = s.ShowTimer ? c.MatchStartedAt : null,
-            LargeImage = AssetKey(s.LargeImageKey),
+            LargeImage = DiscordApp.LargeImageKey,
             LargeText = Fit(largeText),
-            SmallImage = AssetKey(inTeam ? s.TeamImageKey : s.SoloImageKey),
-            SmallText = Fit(string.Format(CultureInfo.InvariantCulture, t.ModeTooltip, mode)),
+            SmallImage = inTeam ? DiscordApp.TeamImageKey : DiscordApp.SoloImageKey,
+            SmallText = DiscordApp.SmallImageText,
             Buttons = Buttons(t),
         };
     }
@@ -146,14 +134,8 @@ public static class PresenceBuilder
 
     private static IReadOnlyList<PresenceButton> Buttons(PresenceTexts t)
     {
-        var label = Truncate(Clean(t.ButtonLabel) ?? "GitHub", MaxButtonLabel);
-        return label.Length == 0 ? [] : [new PresenceButton(label, ProjectUrl)];
-    }
-
-    private static string? AssetKey(string? key)
-    {
-        var k = key?.Trim();
-        return string.IsNullOrEmpty(k) || k.Length > MaxAssetKey ? null : k;
+        // Fixed label and URL: neither comes from settings or translations.
+        return [new PresenceButton(DiscordApp.ButtonLabel, DiscordApp.ProjectUrl)];
     }
 
     /// <summary>Clamps to 2–128 characters without splitting surrogate pairs.</summary>

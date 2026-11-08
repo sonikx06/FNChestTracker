@@ -4,6 +4,7 @@ using System.IO.Pipes;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using ChestTracker.Core.Diagnostics;
 
 namespace ChestTracker.Core.Presence;
 
@@ -141,6 +142,13 @@ public sealed class DiscordIpcConnection : IAsyncDisposable
                 var data = response["data"];
                 throw new DiscordRpcException(data?["code"]?.ToString() ?? "error", data?["message"]?.GetValue<string>() ?? "Discord error");
             }
+
+            if (activity is not null && !_ackLogged)
+            {
+                _ackLogged = true;
+                LastAcceptedButtons = DescribeButtons(response?["data"]);
+                Log.Info($"Discord accepted the activity; buttons echoed: {LastAcceptedButtons}");
+            }
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
@@ -150,6 +158,27 @@ public sealed class DiscordIpcConnection : IAsyncDisposable
         {
             _pending.TryRemove(nonce, out _);
         }
+    }
+
+    /// <summary>Buttons as Discord echoed them in its reply, e.g. "GitHub → https://…" (diagnostics).</summary>
+    public string? LastAcceptedButtons { get; private set; }
+
+    private bool _ackLogged;
+
+    /// <summary>Discord replies with button labels and their URLs under metadata.button_urls.</summary>
+    internal static string DescribeButtons(JsonNode? data)
+    {
+        if (data?["buttons"] is not JsonArray labels || labels.Count == 0)
+        {
+            return "none";
+        }
+
+        var urls = data["metadata"]?["button_urls"] as JsonArray;
+        return string.Join(", ", labels.Select((l, i) =>
+        {
+            var label = l is JsonObject o ? o["label"]?.ToString() : l?.ToString();
+            return $"{label} → {urls?.ElementAtOrDefault(i)?.ToString() ?? "?"}";
+        }));
     }
 
     internal static JsonObject ToJson(PresenceActivity a)

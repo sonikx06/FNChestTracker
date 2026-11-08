@@ -243,8 +243,8 @@ public sealed class DiscordSettings
 {
     public bool Enabled { get; set; } = true;
 
-    /// <summary>Application ID from the Discord Developer Portal (public, not a secret).</summary>
-    public string ApplicationId { get; set; } = "";
+    // The Application ID, project URL and art asset keys are fixed constants (DiscordApp), not settings.
+    // Values saved by older versions ("ApplicationId", "ProjectUrl", "*ImageKey") are ignored when loading.
 
     public bool ShowNickname { get; set; } = true;
 
@@ -256,11 +256,6 @@ public sealed class DiscordSettings
     public bool ShowTimer { get; set; } = true;
     public PresencePriority Priority { get; set; } = PresencePriority.MatchChests;
     public bool HideWhenFortniteNotRunning { get; set; }
-
-    // Art asset keys uploaded under Rich Presence → Art Assets.
-    public string LargeImageKey { get; set; } = "logo";
-    public string SoloImageKey { get; set; } = "solo";
-    public string TeamImageKey { get; set; } = "team";
 }
 
 public sealed class AppSettings
@@ -280,11 +275,7 @@ public sealed class AppSettings
     public AppSettings Normalize()
     {
         Discord ??= new DiscordSettings();
-        Discord.ApplicationId = new string((Discord.ApplicationId ?? "").Where(char.IsAsciiDigit).ToArray());
         Discord.Nickname ??= "";
-        Discord.LargeImageKey ??= "logo";
-        Discord.SoloImageKey ??= "solo";
-        Discord.TeamImageKey ??= "team";
         if (!Enum.IsDefined(Discord.Priority))
         {
             Discord.Priority = PresencePriority.MatchChests;
