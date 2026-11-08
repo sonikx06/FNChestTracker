@@ -7,7 +7,14 @@ namespace ChestTracker.Server.Services;
 
 public sealed record Membership(Guid PartyId, PartyRole Role);
 
-public sealed record SubmitResult(Guid? PartyId, IReadOnlyList<EventAck> Acks, IReadOnlyList<ActivityDto> Activity, bool Changed);
+/// <param name="PartyId">The sender's current party (live activity goes there), null when not in a party.</param>
+/// <param name="ChangedParties">Parties whose statistics changed (current and/or former parties).</param>
+public sealed record SubmitResult(Guid? PartyId, IReadOnlyList<EventAck> Acks, IReadOnlyList<ActivityDto> Activity, IReadOnlyList<Guid> ChangedParties)
+{
+    public bool Changed => ChangedParties.Count > 0;
+}
+
+public sealed record MembershipPeriod(Guid PartyId, DateTimeOffset Start, DateTimeOffset? End);
 
 /// <summary>
 /// All party rules and persistence. Every public method validates the caller's membership and role
@@ -42,7 +49,7 @@ public sealed class PartyService(NpgsqlDataSource db, IOptions<ServerOptions> op
     {
         await using var c = await db.OpenConnectionAsync();
         await using var tx = await c.BeginTransactionAsync();
-        var partyId = await LeaveCoreAsync(c, tx, playerId);
+        var partyId = await LeaveCoreAsync(c, tx, playerId, "account_deleted");
         // Parties this player still owns (should not exist after leaving, but be safe).
         await c.ExecAsync("DELETE FROM parties WHERE owner_id = @p", tx, ("p", playerId));
         await c.ExecAsync("DELETE FROM players WHERE id = @p", tx, ("p", playerId));
@@ -61,7 +68,7 @@ public sealed class PartyService(NpgsqlDataSource db, IOptions<ServerOptions> op
 
         await using var c = await db.OpenConnectionAsync();
         await using var tx = await c.BeginTransactionAsync();
-        await LeaveCoreAsync(c, tx, playerId);
+        await LeaveCoreAsync(c, tx, playerId, "switched_party");
         await c.ExecAsync("""
             INSERT INTO parties (id, name, owner_id, max_players, invite_code, invite_expires_at, created_at)
             VALUES (@id, @n, @o, @m, @code, @exp, @t)
@@ -69,6 +76,7 @@ public sealed class PartyService(NpgsqlDataSource db, IOptions<ServerOptions> op
             ("exp", now.AddHours(O.InviteTtlHours)), ("t", now));
         await c.ExecAsync("INSERT INTO party_members (party_id, player_id, role, joined_at) VALUES (@pa, @pl, @r, @t)", tx,
             ("pa", partyId), ("pl", playerId), ("r", PartyRole.Owner), ("t", now));
+        await OpenPeriodAsync(c, tx, partyId, playerId, now);
         await tx.CommitAsync();
         return await GetStateAsync(c, null, partyId);
     }
@@ -104,11 +112,12 @@ public sealed class PartyService(NpgsqlDataSource db, IOptions<ServerOptions> op
             throw new PartyException(409, ErrorCodes.PartyFull, "The party is full.");
         }
 
-        var previous = await LeaveCoreAsync(c, tx, playerId);
+        var previous = await LeaveCoreAsync(c, tx, playerId, "switched_party");
         await c.ExecAsync("""
             INSERT INTO party_members (party_id, player_id, role, joined_at) VALUES (@pa, @pl, 0, @t)
             ON CONFLICT (party_id, player_id) DO UPDATE SET left_at = NULL, joined_at = @t, role = 0
             """, tx, ("pa", party.Id), ("pl", playerId), ("t", now));
+        await OpenPeriodAsync(c, tx, party.Id, playerId, now); // a rejoin starts a new, separate period
 
         var active = await GetActiveMatchAsync(c, tx, party.Id);
         if (active is not null)
@@ -127,7 +136,7 @@ public sealed class PartyService(NpgsqlDataSource db, IOptions<ServerOptions> op
     {
         await using var c = await db.OpenConnectionAsync();
         await using var tx = await c.BeginTransactionAsync();
-        var partyId = await LeaveCoreAsync(c, tx, playerId);
+        var partyId = await LeaveCoreAsync(c, tx, playerId, "left");
         await tx.CommitAsync();
         return partyId;
     }
@@ -149,14 +158,18 @@ public sealed class PartyService(NpgsqlDataSource db, IOptions<ServerOptions> op
         }
 
         await using var c = await db.OpenConnectionAsync();
-        var m = await RequireOwnerAsync(c, null, ownerId);
-        var removed = await c.ExecAsync("UPDATE party_members SET left_at = @t WHERE party_id = @p AND player_id = @x AND left_at IS NULL", null,
-            ("t", clock.GetUtcNow()), ("p", m.PartyId), ("x", targetId));
+        await using var tx = await c.BeginTransactionAsync();
+        var m = await RequireOwnerAsync(c, tx, ownerId);
+        var now = clock.GetUtcNow();
+        var removed = await c.ExecAsync("UPDATE party_members SET left_at = @t WHERE party_id = @p AND player_id = @x AND left_at IS NULL", tx,
+            ("t", now), ("p", m.PartyId), ("x", targetId));
         if (removed == 0)
         {
             throw new PartyException(404, ErrorCodes.NotMember, "Player is not in the party.");
         }
 
+        await ClosePeriodAsync(c, tx, m.PartyId, targetId, now, "kicked");
+        await tx.CommitAsync();
         return m.PartyId;
     }
 
@@ -284,21 +297,30 @@ public sealed class PartyService(NpgsqlDataSource db, IOptions<ServerOptions> op
         await using var c = await db.OpenConnectionAsync();
         await using var tx = await c.BeginTransactionAsync();
         var membership = await GetMembershipAsync(c, tx, playerId);
-        if (membership is null)
-        {
-            await tx.CommitAsync();
-            return new SubmitResult(null, events.Select(e => new EventAck(e.EventId, AckStatus.Rejected, false, ErrorCodes.NotMember)).ToList(), [], false);
-        }
-
-        var partyId = membership.PartyId;
-        var shareActivity = await c.ScalarAsync<bool>("SELECT share_activity FROM party_members WHERE party_id = @p AND player_id = @x", tx,
-            ("p", partyId), ("x", playerId));
+        var currentParty = membership?.PartyId;
+        var shareActivity = currentParty is { } cp && await c.ScalarAsync<bool>(
+            "SELECT share_activity FROM party_members WHERE party_id = @p AND player_id = @x", tx, ("p", cp), ("x", playerId));
         var displayName = await c.ScalarAsync<string>("SELECT display_name FROM players WHERE id = @x", tx, ("x", playerId)) ?? "";
         var matchCache = new Dictionary<Guid, (Guid PartyId, DateTimeOffset Start, DateTimeOffset? End, bool Participant)?>();
+        var periodCache = new Dictionary<Guid, List<MembershipPeriod>>();
+        var grace = TimeSpan.FromSeconds(Math.Max(0, O.MembershipGraceSeconds));
 
         var acks = new List<EventAck>(events.Count);
         var activity = new List<ActivityDto>();
-        var changed = false;
+        var changed = new HashSet<Guid>();
+
+        // An event belongs to a party only if the sender was a member of it at the event's own time.
+        async Task<bool> WasMemberAsync(Guid party, DateTimeOffset at)
+        {
+            if (!periodCache.TryGetValue(party, out var periods))
+            {
+                periods = await GetPeriodsAsync(c, tx, playerId, party);
+                periodCache[party] = periods;
+            }
+
+            // An open period has no upper bound here: future timestamps are already limited by MaxFutureSkewMinutes.
+            return periods.Any(p => at >= p.Start - grace && (p.End is not { } end || at <= end + grace));
+        }
 
         foreach (var e in events)
         {
@@ -320,6 +342,33 @@ public sealed class PartyService(NpgsqlDataSource db, IOptions<ServerOptions> op
                 continue;
             }
 
+            // Undo target (validated below); an undo always belongs to the party of the chest it removes.
+            (Guid Player, short Kind, bool Verified, Guid Party) target = default;
+            if (e.Kind == EventKind.Undo)
+            {
+                target = (await c.ListAsync("SELECT player_id, kind, verified, party_id FROM chest_events WHERE event_id = @id", tx,
+                    r => (r.GetGuid(0), r.GetInt16(1), r.GetBoolean(2), r.GetGuid(3)), ("id", e.UndoesEventId!.Value))).FirstOrDefault();
+                if (target.Player != Guid.Empty && (target.Player != playerId || target.Kind != (short)EventKind.Add))
+                {
+                    acks.Add(new EventAck(e.EventId, AckStatus.Rejected, false, "invalid_undo_target"));
+                    continue;
+                }
+            }
+
+            var partyId = target.Player != Guid.Empty ? target.Party : e.PartyId ?? currentParty;
+            if (partyId is not { } pid)
+            {
+                acks.Add(new EventAck(e.EventId, AckStatus.Rejected, false, ErrorCodes.NotMember));
+                continue;
+            }
+
+            if (!await WasMemberAsync(pid, e.ClientTimestamp))
+            {
+                // Recorded before joining or after leaving: never counted for that party.
+                acks.Add(new EventAck(e.EventId, AckStatus.Rejected, false, pid == currentParty ? "outside_membership" : ErrorCodes.NotMember));
+                continue;
+            }
+
             string? flag = null;
             var verified = true;
 
@@ -338,9 +387,9 @@ public sealed class PartyService(NpgsqlDataSource db, IOptions<ServerOptions> op
                     matchCache[sid] = info;
                 }
 
-                var grace = TimeSpan.FromMinutes(O.SharedMatchGraceMinutes);
-                if (info is { } i && i.PartyId == partyId && i.Participant
-                    && e.ClientTimestamp >= i.Start - grace && e.ClientTimestamp <= (i.End ?? now) + grace)
+                var matchGrace = TimeSpan.FromMinutes(O.SharedMatchGraceMinutes);
+                if (info is { } i && i.PartyId == pid && i.Participant
+                    && e.ClientTimestamp >= i.Start - matchGrace && e.ClientTimestamp <= (i.End ?? now) + matchGrace)
                 {
                     sharedMatchId = sid;
                 }
@@ -369,24 +418,14 @@ public sealed class PartyService(NpgsqlDataSource db, IOptions<ServerOptions> op
                     flag = "rate_limited";
                 }
             }
+            else if (target.Player == Guid.Empty)
+            {
+                verified = false;
+                flag = "unknown_undo_target";
+            }
             else
             {
-                var target = (await c.ListAsync("SELECT player_id, kind, verified FROM chest_events WHERE event_id = @id", tx,
-                    r => (Player: r.GetGuid(0), Kind: r.GetInt16(1), Verified: r.GetBoolean(2)), ("id", e.UndoesEventId!.Value))).FirstOrDefault();
-                if (target.Player == Guid.Empty)
-                {
-                    verified = false;
-                    flag = "unknown_undo_target";
-                }
-                else if (target.Player != playerId || target.Kind != (short)EventKind.Add)
-                {
-                    acks.Add(new EventAck(e.EventId, AckStatus.Rejected, false, "invalid_undo_target"));
-                    continue;
-                }
-                else
-                {
-                    verified = target.Verified;
-                }
+                verified = target.Verified;
             }
 
             var inserted = await c.ExecAsync("""
@@ -394,7 +433,7 @@ public sealed class PartyService(NpgsqlDataSource db, IOptions<ServerOptions> op
                                           undoes_event_id, confidence, client_ts, server_ts, verified, flag)
                 VALUES (@id, @x, @p, @s, @lm, @k, @src, @d, @u, @conf, @ct, @st, @v, @f)
                 ON CONFLICT DO NOTHING
-                """, tx, ("id", e.EventId), ("x", playerId), ("p", partyId), ("s", sharedMatchId), ("lm", e.LocalMatchId),
+                """, tx, ("id", e.EventId), ("x", playerId), ("p", pid), ("s", sharedMatchId), ("lm", e.LocalMatchId),
                 ("k", e.Kind), ("src", e.Source), ("d", e.Delta), ("u", e.UndoesEventId), ("conf", e.Confidence),
                 ("ct", e.ClientTimestamp), ("st", now), ("v", verified), ("f", flag));
             if (inserted == 0)
@@ -404,16 +443,17 @@ public sealed class PartyService(NpgsqlDataSource db, IOptions<ServerOptions> op
                 continue;
             }
 
-            changed = true;
+            changed.Add(pid);
             acks.Add(new EventAck(e.EventId, AckStatus.Accepted, verified, flag));
-            if (shareActivity && e.Kind != EventKind.Correction && e.ClientTimestamp > now.AddSeconds(-O.LiveActivityWindowSeconds))
+            if (pid == currentParty && shareActivity && e.Kind != EventKind.Correction
+                && e.ClientTimestamp > now.AddSeconds(-O.LiveActivityWindowSeconds))
             {
                 activity.Add(new ActivityDto(playerId, displayName, e.Kind, e.Source, e.Delta, e.ClientTimestamp, sharedMatchId));
             }
         }
 
         await tx.CommitAsync();
-        return new SubmitResult(partyId, acks, activity, changed);
+        return new SubmitResult(currentParty, acks, activity, changed.ToList());
     }
 
     private string? ValidateShape(ChestEventDto e, DateTimeOffset now)
@@ -491,20 +531,7 @@ public sealed class PartyService(NpgsqlDataSource db, IOptions<ServerOptions> op
         var result = new List<SharedMatchHistoryDto>();
         foreach (var match in matches)
         {
-            var participants = await c.ListAsync("""
-                SELECT sp.player_id, pl.display_name, COALESCE(pm.share_counts, false),
-                       COALESCE(SUM(CASE WHEN e.verified AND e.kind IN (0, 1) THEN e.delta END), 0)::int,
-                       COALESCE(SUM(e.delta), 0)::int
-                FROM shared_match_participants sp
-                JOIN players pl ON pl.id = sp.player_id
-                LEFT JOIN party_members pm ON pm.party_id = @p AND pm.player_id = sp.player_id
-                LEFT JOIN chest_events e ON e.shared_match_id = sp.match_id AND e.player_id = sp.player_id
-                WHERE sp.match_id = @m AND sp.response = 1
-                GROUP BY sp.player_id, pl.display_name, pm.share_counts
-                ORDER BY pl.display_name
-                """, null, r => new ParticipantStatsDto(r.GetGuid(0), r.GetString(1),
-                    r.GetBoolean(2) ? new CountPair(r.GetInt32(3), r.GetInt32(4)) : null),
-                ("p", m.PartyId), ("m", match.Id));
+            var participants = await GetParticipantStatsAsync(c, null, m.PartyId, match.Id);
             var team = new CountPair(participants.Sum(p => p.Counts?.Verified ?? 0), participants.Sum(p => p.Counts?.Reported ?? 0));
             result.Add(new SharedMatchHistoryDto(match.Id, match.StartedAt, match.EndedAt, participants, team));
         }
@@ -544,14 +571,43 @@ public sealed class PartyService(NpgsqlDataSource db, IOptions<ServerOptions> op
                 r.IsDBNull(9) ? null : (ParticipantResponse)r.GetInt16(9));
         }, ("p", partyId), ("m", active?.Id ?? Guid.Empty));
 
-        var teamMatch = new CountPair(members.Sum(x => x.Match?.Verified ?? 0), members.Sum(x => x.Match?.Reported ?? 0));
-        var teamLifetime = new CountPair(members.Sum(x => x.Lifetime?.Verified ?? 0), members.Sum(x => x.Lifetime?.Reported ?? 0));
+        // Same definition as the final match result in history, so a member leaving mid-match changes nothing.
+        var participants = active is null ? [] : await GetParticipantStatsAsync(c, tx, partyId, active.Id);
+        var teamMatch = new CountPair(participants.Sum(p => p.Counts?.Verified ?? 0), participants.Sum(p => p.Counts?.Reported ?? 0));
+        // Everything accepted for this party, by current and former members alike (events keep the party they were
+        // recorded in). Players who hide their counts are left out, as before; deleted accounts take their events with them.
+        var teamLifetime = (await c.ListAsync("""
+            SELECT COALESCE(SUM(CASE WHEN e.verified AND e.kind IN (0, 1) THEN e.delta END), 0)::int, COALESCE(SUM(e.delta), 0)::int
+            FROM chest_events e
+            JOIN party_members pm ON pm.party_id = e.party_id AND pm.player_id = e.player_id
+            WHERE e.party_id = @p AND pm.share_counts
+            """, tx, r => new CountPair(r.GetInt32(0), r.GetInt32(1)), ("p", partyId))).Single();
         return new PartyStateDto(partyId, party.Name, party.Owner, party.Max, party.Code, party.Exp, members, active,
             teamMatch, teamLifetime, clock.GetUtcNow());
     }
 
+    /// <summary>
+    /// Per-participant counts of one shared match: every player who accepted it (including one who left the party
+    /// afterwards), only events attributed to that match, hidden counts (share_counts off) excluded.
+    /// </summary>
+    private static Task<List<ParticipantStatsDto>> GetParticipantStatsAsync(NpgsqlConnection c, NpgsqlTransaction? tx, Guid partyId, Guid matchId) =>
+        c.ListAsync("""
+            SELECT sp.player_id, pl.display_name, COALESCE(pm.share_counts, false),
+                   COALESCE(SUM(CASE WHEN e.verified AND e.kind IN (0, 1) THEN e.delta END), 0)::int,
+                   COALESCE(SUM(e.delta), 0)::int
+            FROM shared_match_participants sp
+            JOIN players pl ON pl.id = sp.player_id
+            LEFT JOIN party_members pm ON pm.party_id = @p AND pm.player_id = sp.player_id
+            LEFT JOIN chest_events e ON e.shared_match_id = sp.match_id AND e.player_id = sp.player_id
+            WHERE sp.match_id = @m AND sp.response = 1
+            GROUP BY sp.player_id, pl.display_name, pm.share_counts
+            ORDER BY pl.display_name
+            """, tx, r => new ParticipantStatsDto(r.GetGuid(0), r.GetString(1),
+                r.GetBoolean(2) ? new CountPair(r.GetInt32(3), r.GetInt32(4)) : null),
+            ("p", partyId), ("m", matchId));
+
     /// <summary>Removes the player from their current party, handing ownership over or deleting an empty party.</summary>
-    private async Task<Guid?> LeaveCoreAsync(NpgsqlConnection c, NpgsqlTransaction tx, Guid playerId)
+    private async Task<Guid?> LeaveCoreAsync(NpgsqlConnection c, NpgsqlTransaction tx, Guid playerId, string reason)
     {
         var m = await GetMembershipAsync(c, tx, playerId);
         if (m is null)
@@ -559,8 +615,10 @@ public sealed class PartyService(NpgsqlDataSource db, IOptions<ServerOptions> op
             return null;
         }
 
+        var now = clock.GetUtcNow();
         await c.ExecAsync("UPDATE party_members SET left_at = @t WHERE party_id = @p AND player_id = @x", tx,
-            ("t", clock.GetUtcNow()), ("p", m.PartyId), ("x", playerId));
+            ("t", now), ("p", m.PartyId), ("x", playerId));
+        await ClosePeriodAsync(c, tx, m.PartyId, playerId, now, reason);
 
         if (m.Role == PartyRole.Owner)
         {
@@ -579,6 +637,27 @@ public sealed class PartyService(NpgsqlDataSource db, IOptions<ServerOptions> op
 
         return m.PartyId;
     }
+
+    private static async Task OpenPeriodAsync(NpgsqlConnection c, NpgsqlTransaction tx, Guid partyId, Guid playerId, DateTimeOffset at)
+    {
+        await c.ExecAsync("""
+            INSERT INTO party_membership_periods (party_id, player_id, started_at) VALUES (@p, @x, @t)
+            ON CONFLICT (party_id, player_id) WHERE ended_at IS NULL DO NOTHING
+            """, tx, ("p", partyId), ("x", playerId), ("t", at));
+    }
+
+    private static Task<int> ClosePeriodAsync(NpgsqlConnection c, NpgsqlTransaction tx, Guid partyId, Guid playerId, DateTimeOffset at, string reason) =>
+        c.ExecAsync("""
+            UPDATE party_membership_periods SET ended_at = @t, end_reason = @r
+            WHERE party_id = @p AND player_id = @x AND ended_at IS NULL
+            """, tx, ("t", at), ("r", reason), ("p", partyId), ("x", playerId));
+
+    /// <summary>All membership periods of a player in one party (oldest first).</summary>
+    private static Task<List<MembershipPeriod>> GetPeriodsAsync(NpgsqlConnection c, NpgsqlTransaction? tx, Guid playerId, Guid partyId) =>
+        c.ListAsync("""
+            SELECT party_id, started_at, ended_at FROM party_membership_periods
+            WHERE player_id = @x AND party_id = @p ORDER BY started_at
+            """, tx, r => new MembershipPeriod(r.GetGuid(0), r.Ts(1), r.NTs(2)), ("x", playerId), ("p", partyId));
 
     private static async Task SetOwnerAsync(NpgsqlConnection c, NpgsqlTransaction tx, Guid partyId, Guid newOwner)
     {

@@ -120,6 +120,10 @@ public class DedicatedServerTests(ServerFixture fx)
 
         using var admin = fx.CreateClient();
         admin.DefaultRequestHeaders.Add("X-Admin-Key", ServerFixture.AdminKey);
+        // Presence is registered by the hub's OnConnected, which can finish just after the client's start returns.
+        await Wait.UntilAsync(async () =>
+            (await admin.GetFromJsonAsync<List<AdminPartyDto>>("/api/admin/parties", SyncClient.Json))!
+            .Any(r => r.Name == "Room" && r.OnlineMembers == 1), "presence registered");
         var stats = await admin.GetFromJsonAsync<AdminStatsDto>("/api/admin/stats", SyncClient.Json);
         var rooms = await admin.GetFromJsonAsync<List<AdminPartyDto>>("/api/admin/parties", SyncClient.Json);
 
@@ -175,7 +179,7 @@ public class DedicatedServerTests(ServerFixture fx)
         var (owner, mate) = (await fx.RegisterAsync("B-owner"), await fx.RegisterAsync("B-mate"));
         var party = await owner.PostAsync<PartyStateDto>("/api/parties", new CreatePartyRequest("Backup", 4));
         await mate.PostAsync<PartyStateDto>("/api/parties/join", new JoinPartyRequest(party.InviteCode!));
-        await owner.SubmitAsync(Ev.Add(DateTimeOffset.UtcNow.AddSeconds(-30)), Ev.Add(DateTimeOffset.UtcNow.AddSeconds(-20)));
+        await owner.SubmitAsync(Ev.Add(DateTimeOffset.UtcNow.AddSeconds(5)), Ev.Add(DateTimeOffset.UtcNow.AddSeconds(15)));
 
         using var admin = fx.CreateClient();
         admin.DefaultRequestHeaders.Add("X-Admin-Key", ServerFixture.AdminKey);

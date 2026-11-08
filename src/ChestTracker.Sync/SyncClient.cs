@@ -526,7 +526,9 @@ public sealed class SyncClient : IAsyncDisposable
         try
         {
             _outbox.EnqueueNew();
-            while (_hub is { State: HubConnectionState.Connected } hub && Party is not null && !_cts.IsCancellationRequested)
+            // Also runs outside a party: unsent events of a former party are still delivered.
+            while (_hub is { State: HubConnectionState.Connected } hub && (Party is not null || _outbox.Count > 0)
+                   && !_cts.IsCancellationRequested)
             {
                 var items = _outbox.Peek(100);
                 if (items.Count == 0)
@@ -672,8 +674,10 @@ public sealed class SyncClient : IAsyncDisposable
         });
         hub.Reconnecting += _ =>
         {
-            // The server may have restarted with a new signing key: fetch a fresh token on reconnect.
+            // The server may have restarted with a new signing key: fetch a fresh token on reconnect,
+            // over a fresh HTTP client (in-flight requests on the old one simply fail and are retried).
             _token = null;
+            _http = null;
             SetStatus(SyncStatus.Offline);
             return Task.CompletedTask;
         };
@@ -774,8 +778,8 @@ public sealed class SyncClient : IAsyncDisposable
             }
 
             var account = _account ?? throw new InvalidOperationException("Not registered.");
-            _http ??= CreateHttp(account.ServerUrl);
-            var response = await _http.PostAsJsonAsync("api/auth/token", new TokenRequest(account.PlayerId, account.Secret), Json, _cts.Token);
+            var http = _http ??= CreateHttp(account.ServerUrl);
+            var response = await http.PostAsJsonAsync("api/auth/token", new TokenRequest(account.PlayerId, account.Secret), Json, _cts.Token);
             var token = await ReadAsync<TokenResponse>(response);
             _token = token.AccessToken;
             _tokenExpires = token.ExpiresAt;
@@ -790,7 +794,7 @@ public sealed class SyncClient : IAsyncDisposable
     private async Task<T> SendAsync<T>(HttpMethod method, string path, object? body = null)
     {
         var account = _account ?? throw new SyncApiException("not_registered", "Connect to a server first.", 0);
-        _http ??= CreateHttp(account.ServerUrl);
+        var http = _http ??= CreateHttp(account.ServerUrl);
         for (var attempt = 0; ; attempt++)
         {
             using var request = new HttpRequestMessage(method, path);
@@ -800,7 +804,7 @@ public sealed class SyncClient : IAsyncDisposable
                 request.Content = JsonContent.Create(body, body.GetType(), options: Json);
             }
 
-            var response = await _http.SendAsync(request, _cts.Token);
+            var response = await http.SendAsync(request, _cts.Token);
             if (response.StatusCode == HttpStatusCode.Unauthorized && attempt == 0)
             {
                 _token = null;
@@ -896,7 +900,12 @@ public sealed class SyncClient : IAsyncDisposable
         Party = state;
         if (state is null)
         {
-            if (_outbox.PartyId is not null) _outbox.EndParty();
+            // Left or removed: keep what was recorded during the membership queued for delivery.
+            if (_outbox.PartyId is not null)
+            {
+                _outbox.LeaveParty();
+                _matchOps.Writer.TryWrite(FlushAsync);
+            }
         }
         else if (_outbox.PartyId != state.PartyId)
         {
@@ -946,7 +955,12 @@ public sealed class SyncClient : IAsyncDisposable
         if (e.Kind is TrackingChangeKind.ChestAdded or TrackingChangeKind.ChestRemoved or TrackingChangeKind.Corrected
             or TrackingChangeKind.ReviewResolved)
         {
-            _ = FlushAsync();
+            // Queued behind any pending shared-match start/join, so events are sent after their local match is
+            // linked to the shared match (a chest that auto-starts a match would otherwise be sent unlinked).
+            if (!_matchOps.Writer.TryWrite(FlushAsync))
+            {
+                _ = FlushAsync();
+            }
         }
     }
 
@@ -1037,7 +1051,7 @@ public sealed class SyncClient : IAsyncDisposable
     private static ChestEventDto ToDto(OutboxItem i) => new(
         i.EventId, i.LocalMatchId, i.SharedMatchId, (EventKind)(int)i.Kind,
         i.Source == EventSource.Automatic ? EventSourceType.Automatic : EventSourceType.Manual,
-        i.Delta, i.UndoesEventId, i.Timestamp, i.Confidence);
+        i.Delta, i.UndoesEventId, i.Timestamp, i.Confidence, i.PartyId);
 
     private void SetStatus(SyncStatus status)
     {

@@ -54,8 +54,43 @@ public sealed class ServerFixture : IAsyncLifetime
             return;
         }
 
-        var cs = new NpgsqlConnectionStringBuilder(_adminConnection) { Database = _database }.ToString();
-        Factory = new WebApplicationFactory<Program>().WithWebHostBuilder(b =>
+        DatabaseConnectionString = new NpgsqlConnectionStringBuilder(_adminConnection) { Database = _database }.ToString();
+        Factory = CreateFactory();
+        _ = Factory.Server; // starts the host and runs migrations
+        Available = true;
+    }
+
+    /// <summary>Connection string of this fixture's test database (for direct consistency checks).</summary>
+    public string DatabaseConnectionString { get; private set; } = "";
+
+    /// <summary>
+    /// Moves the start of a player's current membership period into the past, for tests that submit backdated
+    /// events to exercise other rules (event age, leaderboard periods). Events count only inside a membership period.
+    /// </summary>
+    public async Task BackdateMembershipAsync(Guid playerId, TimeSpan by)
+    {
+        await using var c = new NpgsqlConnection(DatabaseConnectionString);
+        await c.OpenAsync();
+        await using var cmd = new NpgsqlCommand(
+            "UPDATE party_membership_periods SET started_at = started_at - @by WHERE player_id = @x AND ended_at IS NULL", c);
+        cmd.Parameters.AddWithValue("by", by);
+        cmd.Parameters.AddWithValue("x", playerId);
+        await cmd.ExecuteNonQueryAsync();
+    }
+
+    /// <summary>Stops the server and starts a new instance on the same database (a server restart).</summary>
+    public async Task RestartAsync()
+    {
+        var old = Factory;
+        Factory = CreateFactory();
+        _ = Factory.Server;
+        await old.DisposeAsync();
+    }
+
+    private WebApplicationFactory<Program> CreateFactory()
+    {
+        var cs = DatabaseConnectionString;
+        return new WebApplicationFactory<Program>().WithWebHostBuilder(b =>
         {
             b.UseEnvironment("Testing");
             b.UseSetting("ConnectionStrings:Postgres", cs);
@@ -69,8 +104,6 @@ public sealed class ServerFixture : IAsyncLifetime
             b.UseSetting("ChestTracker:BackupIntervalHours", "0");
             b.UseSetting("ChestTracker:BackupDirectory", BackupDirectory);
         });
-        _ = Factory.Server; // starts the host and runs migrations
-        Available = true;
     }
 
     public async Task DisposeAsync()

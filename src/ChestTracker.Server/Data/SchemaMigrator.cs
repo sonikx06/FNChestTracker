@@ -100,6 +100,29 @@ public sealed class SchemaMigrator(NpgsqlDataSource dataSource, ILogger<SchemaMi
                 SELECT gen_random_uuid(), id, secret_hash, created_at FROM players;
             ALTER TABLE players ALTER COLUMN secret_hash DROP NOT NULL;
             """),
+        (3, """
+            -- Membership history: one row per period a player was in a party (leave + rejoin = two rows).
+            -- Used to decide whether a delayed event belongs to a party. Party lifetime totals themselves come
+            -- from chest_events.party_id, which is stamped when the event is accepted and never changes.
+            CREATE TABLE party_membership_periods (
+                id            bigserial PRIMARY KEY,
+                party_id      uuid NOT NULL REFERENCES parties(id) ON DELETE CASCADE,
+                player_id     uuid NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+                started_at    timestamptz NOT NULL,
+                ended_at      timestamptz NULL,
+                end_reason    text NULL,      -- left | kicked | switched_party | unknown
+                reconstructed boolean NOT NULL DEFAULT false
+            );
+            CREATE INDEX ix_periods_player_party ON party_membership_periods(player_id, party_id, started_at);
+            CREATE UNIQUE INDEX ux_periods_open ON party_membership_periods(party_id, player_id) WHERE ended_at IS NULL;
+
+            -- Backfill from party_members. Only the latest period of each player is known (earlier periods of a
+            -- player who left and rejoined were overwritten); those rows are marked reconstructed. No periods or
+            -- events are invented, and no chest event is touched.
+            INSERT INTO party_membership_periods (party_id, player_id, started_at, ended_at, end_reason, reconstructed)
+                SELECT party_id, player_id, joined_at, left_at, CASE WHEN left_at IS NULL THEN NULL ELSE 'unknown' END, true
+                FROM party_members;
+            """),
     ];
 
     public async Task MigrateAsync(CancellationToken ct = default)

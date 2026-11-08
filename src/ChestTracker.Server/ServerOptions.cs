@@ -38,6 +38,12 @@ public sealed class ServerOptions
     /// <summary>Offline queue limit: older events are rejected.</summary>
     public double MaxEventAgeDays { get; set; } = 14;
 
+    /// <summary>
+    /// Clock-skew allowance at membership boundaries: an event counts for a party only if its timestamp lies within
+    /// a membership period of the sender, widened by this many seconds.
+    /// </summary>
+    public double MembershipGraceSeconds { get; set; } = 10;
+
     /// <summary>Events this close outside a shared match window are still attributed to it.</summary>
     public double SharedMatchGraceMinutes { get; set; } = 2;
 

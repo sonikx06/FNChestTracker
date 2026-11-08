@@ -89,7 +89,10 @@ public sealed record ChestEventDto(
     int Delta,
     Guid? UndoesEventId,
     DateTimeOffset ClientTimestamp,
-    double? Confidence);
+    double? Confidence,
+    // Party the event was recorded in (null from older clients = the sender's current party). Lets events
+    // recorded during a membership be delivered after leaving; the server checks the membership period.
+    Guid? PartyId = null);
 
 public sealed record EventAck(Guid EventId, AckStatus Status, bool Verified, string? Reason);
 

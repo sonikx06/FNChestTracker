@@ -67,11 +67,12 @@ public sealed class PartyHub(PartyService parties, PresenceTracker presence, Not
             {
                 await Clients.OthersInGroup(Notifier.Group(p)).SendAsync(ClientMethods.Activity, a);
             }
+        }
 
-            if (result.Changed)
-            {
-                await notifier.BroadcastStateAsync(p);
-            }
+        // Late events of a former member update that party too.
+        foreach (var party in result.ChangedParties)
+        {
+            await notifier.BroadcastStateAsync(party);
         }
 
         return result.Acks;

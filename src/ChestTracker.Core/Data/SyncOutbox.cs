@@ -36,7 +36,10 @@ public sealed class SyncOutbox(SqliteDatabase db)
 
     public int Count => db.Run(c => (int)c.Command("SELECT COUNT(*) FROM sync_outbox").ScalarLong());
 
-    /// <summary>Starts syncing for a party. Only events recorded from now on are shared.</summary>
+    /// <summary>
+    /// Starts syncing for a party. Only events recorded from now on are shared. Unsent events of a previous party stay
+    /// queued with that party's id (the server accepts them only if they were recorded during the membership).
+    /// </summary>
     public void BeginParty(Guid partyId)
     {
         if (PartyId == partyId)
@@ -46,7 +49,7 @@ public sealed class SyncOutbox(SqliteDatabase db)
 
         db.InTransaction((c, tx) =>
         {
-            using (var clear = c.Command("DELETE FROM sync_outbox", tx)) clear.ExecuteNonQuery();
+            EnqueueCore(c, tx); // events of the party being left are queued under that party first
             var max = c.Command("SELECT COALESCE(MAX(seq), 0) FROM chest_events", tx).ScalarLong();
             Set(c, tx, PartyKey, partyId.ToString("D"));
             Set(c, tx, CursorKey, max.ToString(CultureInfo.InvariantCulture));
@@ -54,7 +57,22 @@ public sealed class SyncOutbox(SqliteDatabase db)
         });
     }
 
-    /// <summary>Stops syncing; pending events of the old party are dropped (the server would refuse them).</summary>
+    /// <summary>
+    /// Left or removed from the party: queues what was recorded up to now under that party and stops queuing new events.
+    /// The queue is kept, so events recorded during the membership are still delivered (the server checks their time).
+    /// </summary>
+    public void LeaveParty() => db.InTransaction((c, tx) =>
+    {
+        EnqueueCore(c, tx);
+        using var meta = c.Command("DELETE FROM app_meta WHERE key IN ($a, $b)", tx);
+        meta.Bind("$a", PartyKey).Bind("$b", CursorKey).ExecuteNonQuery();
+        return 0;
+    });
+
+    /// <summary>
+    /// Forgets everything queued (sign-out, switching account or server): one identity's events are never delivered
+    /// as another's.
+    /// </summary>
     public void EndParty() => db.InTransaction((c, tx) =>
     {
         using (var clear = c.Command("DELETE FROM sync_outbox", tx)) clear.ExecuteNonQuery();
@@ -67,7 +85,9 @@ public sealed class SyncOutbox(SqliteDatabase db)
     });
 
     /// <summary>Copies new local events (match events only) into the outbox. Returns how many were queued.</summary>
-    public int EnqueueNew() => db.InTransaction((c, tx) =>
+    public int EnqueueNew() => db.InTransaction(EnqueueCore);
+
+    private static int EnqueueCore(SqliteConnection c, SqliteTransaction tx)
     {
         var party = GetValue(c, tx, PartyKey);
         if (party is null)
@@ -94,7 +114,7 @@ public sealed class SyncOutbox(SqliteDatabase db)
         }
 
         return queued;
-    });
+    }
 
     /// <summary>Oldest pending events first (sequence order keeps undo targets before undos).</summary>
     public IReadOnlyList<OutboxItem> Peek(int max) => db.Run(c =>

@@ -31,6 +31,37 @@ public class SyncOutboxTests : IDisposable
     }
 
     [Fact]
+    public void Leaving_keeps_unsent_events_of_the_membership_and_stops_queuing()
+    {
+        var engine = _db.CreateEngine(_clock, new Core.Tracking.TrackingOptions { ManualDebounce = TimeSpan.Zero });
+        var outbox = new SyncOutbox(_db.Db);
+        var first = Guid.NewGuid();
+        outbox.BeginParty(first);
+        _clock.AdvanceSeconds(5);
+        engine.AddChestManual(false);
+        _clock.AdvanceSeconds(5);
+        engine.AddChestManual(false);              // recorded, not yet queued
+
+        outbox.LeaveParty();                       // queued under the party being left, then queuing stops
+        _clock.AdvanceSeconds(5);
+        engine.AddChestManual(false);              // after leaving: never queued for anyone
+        Assert.Equal(0, outbox.EnqueueNew());
+        Assert.Null(outbox.PartyId);
+        Assert.Equal(2, outbox.Count);
+
+        var second = Guid.NewGuid();
+        outbox.BeginParty(second);                 // joining another party keeps the old party's queue
+        _clock.AdvanceSeconds(5);
+        engine.AddChestManual(false);
+        Assert.Equal(1, outbox.EnqueueNew());
+        Assert.Equal(new[] { first, first, second }, outbox.Peek(10).Select(i => i.PartyId));
+
+        outbox.EndParty();                         // sign-out / other account: everything is dropped
+        Assert.Equal(0, outbox.Count);
+        Assert.Equal(4, engine.GetSnapshot().LifetimeCount); // local statistics untouched throughout
+    }
+
+    [Fact]
     public void Queue_survives_restart_and_removal_is_per_event()
     {
         var engine = _db.CreateEngine(_clock);

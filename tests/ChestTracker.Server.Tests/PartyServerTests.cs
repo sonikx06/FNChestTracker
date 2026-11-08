@@ -16,6 +16,7 @@ public class PartyServerTests(ServerFixture fx)
     {
         var owner = await fx.RegisterAsync("Owner");
         var state = await owner.PostAsync<PartyStateDto>("/api/parties", new CreatePartyRequest("Squad", max));
+        await fx.BackdateMembershipAsync(owner.Id, TimeSpan.FromDays(31)); // these tests submit backdated events
         return (owner, state);
     }
 
@@ -23,6 +24,7 @@ public class PartyServerTests(ServerFixture fx)
     {
         var p = await fx.RegisterAsync(name);
         await p.PostAsync<PartyStateDto>("/api/parties/join", new JoinPartyRequest(state.InviteCode!));
+        await fx.BackdateMembershipAsync(p.Id, TimeSpan.FromDays(31));
         return p;
     }
 

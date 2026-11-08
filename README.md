@@ -110,6 +110,19 @@ in PostgreSQL.
   (at most 5 min in the future and 14 days old), at least 1 s between the same player's chests, and a valid undo target.
 - Manual corrections are never verified.
 
+**Party lifetime totals.** The party total is everything the party ever counted, including chests of members who
+have since left or were kicked.
+- Every leave/kick and rejoin is stored as a separate membership period (`party_membership_periods`). An event
+  counts for a party only if its timestamp falls inside one of the sender's periods for that party (±10 s clock-skew
+  allowance, `MembershipGraceSeconds`). Chests from before joining or after leaving never count, and rejoining never
+  brings old chests in twice.
+- Events recorded during a membership are still delivered after leaving or being kicked (the client keeps them
+  queued with their party); everything recorded after leaving is refused.
+- An undo always applies to the party of the chest it removes, but only if it was recorded during a membership.
+- Players who hide their counts are left out of the total; deleting an account deletes that player's events.
+- Each member's own counter and the current-match total are unchanged: the match total counts every player who
+  accepted the match.
+
 **Server-side validation:**
 - Party ids and roles are always taken from the database, never from the client.
 - SignalR group membership is assigned by the server.
