@@ -1,0 +1,19 @@
+# Optional: PostgreSQL in Docker for the Chest Tracker server.
+#   1. Put a strong password in a .env file next to this file:  POSTGRES_PASSWORD=...
+#   2. docker compose -f docker-compose.postgres.yml up -d
+#   3. ConnectionStrings:Postgres = Host=127.0.0.1;Port=5432;Username=chesttracker;Password=<same>;Database=chesttracker
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: chesttracker
+      POSTGRES_DB: chesttracker
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    ports:
+      - "127.0.0.1:5432:5432"   # only reachable from this machine
+    volumes:
+      - chesttracker-db:/var/lib/postgresql/data
+
+volumes:
+  chesttracker-db:

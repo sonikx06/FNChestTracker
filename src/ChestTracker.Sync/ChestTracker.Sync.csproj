@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>ChestTracker.Sync</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="8.0.10" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ChestTracker.Core\ChestTracker.Core.csproj" />
+    <ProjectReference Include="..\ChestTracker.Protocol\ChestTracker.Protocol.csproj" />
+  </ItemGroup>
+
+</Project>

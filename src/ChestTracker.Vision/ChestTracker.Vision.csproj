@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    EXPERIMENTAL YOLOv8 chest detection: ONNX Runtime inference, tracking, the per-chest
+    Closed → Opening → Opened → Counted state machine and evaluation metrics.
+    It only reads pixels handed to it (screen capture); it never touches the game process.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>ChestTracker.Vision</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.20.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ChestTracker.Core\ChestTracker.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="ChestTracker.Tests" />
+  </ItemGroup>
+
+</Project>

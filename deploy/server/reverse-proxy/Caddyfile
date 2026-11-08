@@ -1,0 +1,6 @@
+# Caddy obtains and renews a Let's Encrypt certificate automatically and proxies WebSockets out of the box.
+# Replace the domain (its DNS A/AAAA record must point to this machine; ports 80 and 443 open).
+# Set "TrustedProxies": ["127.0.0.1"] in appsettings.json when Caddy runs on the same host.
+chests.example.com {
+    reverse_proxy 127.0.0.1:5280
+}

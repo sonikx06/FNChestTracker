@@ -1,0 +1,23 @@
+bin/
+obj/
+artifacts/
+publish/
+.vs/
+*.user
+*.suo
+TestResults/
+ChestTracker-Release/
+ChestTracker-*.zip
+
+# Local portable PostgreSQL used for development and server tests
+tools/pgsql/
+tools/pgdata/
+tools/pg.log
+tools/init.log
+tools/pg-dev-connection.txt
+tools/pgpass.txt
+ChestTracker.zip
+*.onnx
+tools/yolo/data/
+tools/yolo/runs/
+tools/yolo/export/

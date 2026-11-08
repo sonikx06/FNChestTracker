@@ -1,0 +1,31 @@
+# systemd unit for the Chest Tracker dedicated server.
+# Install (as root), assuming the Linux build is unpacked to /opt/chesttracker:
+#   useradd --system --home /opt/chesttracker --shell /usr/sbin/nologin chesttracker
+#   chown -R chesttracker:chesttracker /opt/chesttracker
+#   chmod +x /opt/chesttracker/ChestTracker.Server
+#   cp chesttracker-server.service /etc/systemd/system/
+#   systemctl daemon-reload && systemctl enable --now chesttracker-server
+#   journalctl -u chesttracker-server -f
+[Unit]
+Description=Chest Tracker dedicated server
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=chesttracker
+Group=chesttracker
+WorkingDirectory=/opt/chesttracker
+ExecStart=/opt/chesttracker/ChestTracker.Server
+Environment=ASPNETCORE_ENVIRONMENT=Production
+# Secrets can live here instead of appsettings.json (file readable by root only):
+# EnvironmentFile=/etc/chesttracker/server.env
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/opt/chesttracker
+
+[Install]
+WantedBy=multi-user.target

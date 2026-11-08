@@ -1,0 +1,16 @@
+# YOLOv8 dataset for Chest Tracker (Ultralytics format).
+# Layout:
+#   data/images/train/*.jpg   data/labels/train/*.txt
+#   data/images/val/*.jpg     data/labels/val/*.txt
+# Each label line: <class> <cx> <cy> <w> <h>   (normalized 0..1)
+# Keep the class order: the app maps names to roles (see README.md).
+path: data
+train: images/train
+val: images/val
+
+names:
+  0: chest_closed
+  1: chest_opening
+  2: chest_opened
+  3: ammo_box
+  4: other_container

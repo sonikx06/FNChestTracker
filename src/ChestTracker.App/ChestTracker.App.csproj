@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <!-- Windows 10 SDK projection is needed for Windows.Graphics.Capture. -->
+    <TargetFramework>net8.0-windows10.0.22621.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
+    <UseWPF>true</UseWPF>
+    <!-- Only for the system tray NotifyIcon and GDI capture fallback. -->
+    <UseWindowsForms>true</UseWindowsForms>
+    <RootNamespace>ChestTracker.App</RootNamespace>
+    <AssemblyName>FortniteChestTracker</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <PlatformTarget>x64</PlatformTarget>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <TieredPGO>true</TieredPGO>
+    <InvariantGlobalization>false</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- WinForms implicit usings clash with WPF type names. -->
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.2.2" />
+    <PackageReference Include="OpenCvSharp4" Version="4.10.0.20241108" />
+    <PackageReference Include="OpenCvSharp4.runtime.win" Version="4.10.0.20241108" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ChestTracker.Core\ChestTracker.Core.csproj" />
+    <ProjectReference Include="..\ChestTracker.Sync\ChestTracker.Sync.csproj" />
+    <ProjectReference Include="..\ChestTracker.Vision\ChestTracker.Vision.csproj" />
+  </ItemGroup>
+
+</Project>
