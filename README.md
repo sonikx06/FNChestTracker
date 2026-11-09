@@ -2,7 +2,7 @@
 
 **A Windows application for tracking chest openings in Fortnite.**
 
-[![Latest release](https://img.shields.io/github/v/release/sonikx06/FNChestTracker?include_prereleases&label=download)](https://github.com/sonikx06/FNChestTracker/releases/latest)
+[![Latest release](https://img.shields.io/github/v/release/sonikx06/FNChestTracker?include_prereleases&label=download)](https://github.com/sonikx06/FNChestTracker/releases)
 ![Windows 10/11 x64](https://img.shields.io/badge/Windows-10%20%7C%2011%20x64-blue)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
@@ -19,9 +19,11 @@ most chests.
 
 ## Download
 
-### [⬇ Download the latest version](https://github.com/sonikx06/FNChestTracker/releases/latest)
+### [⬇ Download the latest version](https://github.com/sonikx06/FNChestTracker/releases)
 
-On the release page, under **Assets**, download **`FortniteChestTracker-win-x64.zip`**. That is the complete app; you
+Open the newest release at the top of the [Releases page](https://github.com/sonikx06/FNChestTracker/releases) and,
+under **Assets**, download **`FortniteChestTracker-win-x64.zip`**
+([direct link for v1.2.0](https://github.com/sonikx06/FNChestTracker/releases/download/v1.2.0/FortniteChestTracker-win-x64.zip)). That is the complete app; you
 do not need anything else. (The `Server` downloads are only for people who want to host a multiplayer server.)
 
 ## Screenshots
@@ -62,7 +64,7 @@ In-game overlay:
 
 ## Installation
 
-1. Open the [Releases page](https://github.com/sonikx06/FNChestTracker/releases/latest).
+1. Open the [Releases page](https://github.com/sonikx06/FNChestTracker/releases) and pick the newest release.
 2. Download **`FortniteChestTracker-win-x64.zip`**.
 3. Right-click the ZIP → **Extract All…**, and extract it to a folder of your choice (for example `Documents`).
    Keep all files together: the app needs the files and the `models` folder next to it.

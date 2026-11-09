@@ -1,7 +1,7 @@
 # Contributing and developer guide
 
 Thanks for your interest in Fortnite Chest Tracker. This page is for people who want to build, test or change the
-code. Players only need the [README](README.md) and the [latest release](https://github.com/sonikx06/FNChestTracker/releases/latest).
+code. Players only need the [README](README.md) and the [latest release](https://github.com/sonikx06/FNChestTracker/releases).
 
 ## Requirements
 
