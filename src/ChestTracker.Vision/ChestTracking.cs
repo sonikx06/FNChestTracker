@@ -69,6 +69,13 @@ public sealed record ChestTrackingOptions
     /// <summary>The open chest must then be seen in at least this many frames (consecutive when there is no opening class).</summary>
     public int MinOpenedFrames { get; init; } = 2;
 
+    /// <summary>
+    /// Without an opening class: when the first <see cref="MinOpenedFrames"/> open frames are not confident enough to
+    /// count, keep watching the same chest up to this many consecutive open frames and decide on the best ones (the
+    /// first frames of an opening are often blurred by the lid animation and loot burst).
+    /// </summary>
+    public int MaxOpenedFrames { get; init; } = 4;
+
     /// <summary>Without an opening class: the required open frames must fall within this time of the first one.</summary>
     public TimeSpan ConfirmationWindow { get; init; } = TimeSpan.FromSeconds(2);
 
@@ -282,7 +289,13 @@ public sealed class ChestTrack
                     if (!_o.ModelHasOpeningClass)
                     {
                         // The model cannot see the animation: closed → opened on one track is all the evidence there is.
-                        var conf = Confidence(closedBonus: true);
+                        // Scored on the best open frames; weak early frames wait for a few more before deciding.
+                        var conf = Math.Clamp(_openedConf.OrderByDescending(c => c).Take(_o.MinOpenedFrames).Average(), 0, 1);
+                        if (conf < _o.ConfirmThreshold && _openedRun < Math.Max(_o.MinOpenedFrames, _o.MaxOpenedFrames))
+                        {
+                            return null;
+                        }
+
                         return Complete(obs, DetectionOutcomeFor(conf), conf, "closed → opened");
                     }
 

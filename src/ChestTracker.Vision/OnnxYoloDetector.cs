@@ -237,10 +237,17 @@ public sealed class YoloChestPipeline : IDisposable
     public PipelineFrame Process(ReadOnlySpan<byte> bgra, int width, int height, int stride, DateTimeOffset timestamp)
     {
         var sw = Stopwatch.StartNew();
-        var detections = _detector.Detect(bgra, width, height, stride);
-        var update = Tracker.Update(detections, timestamp);
-        return new PipelineFrame(timestamp, detections, update, sw.Elapsed.TotalMilliseconds);
+        var detections = Detect(bgra, width, height, stride);
+        return Track(detections, timestamp, sw.Elapsed.TotalMilliseconds);
     }
+
+    /// <summary>Model inference only (the slow part); does not touch the chest tracks.</summary>
+    public IReadOnlyList<Detection> Detect(ReadOnlySpan<byte> bgra, int width, int height, int stride) =>
+        _detector.Detect(bgra, width, height, stride);
+
+    /// <summary>Feeds one frame's detections to the chest tracks.</summary>
+    public PipelineFrame Track(IReadOnlyList<Detection> detections, DateTimeOffset timestamp, double elapsedMs) =>
+        new(timestamp, detections, Tracker.Update(detections, timestamp), elapsedMs);
 
     public void Reset() => Tracker.Reset();
 

@@ -220,17 +220,38 @@ public sealed class PartyService(NpgsqlDataSource db, IOptions<ServerOptions> op
 
     // ========================================================= shared matches
 
-    public async Task<SharedMatchDto> StartSharedMatchAsync(Guid playerId)
+    /// <summary>Result of a start: the match the owner now plays in, and a previous one that this start ended.</summary>
+    public sealed record SharedMatchStart(SharedMatchDto Match, SharedMatchDto? Ended);
+
+    /// <summary>
+    /// Owner starts a shared match. If one is active and the owner still plays in it, it is returned unchanged.
+    /// If the owner already finished it (stopped counting) but other participants are still playing, it is left
+    /// alone and the start is refused (<see cref="ErrorCodes.MatchActive"/>): one player's next match never ends
+    /// the match the others are still in. If nobody plays in it any more, it is ended and a new one starts.
+    /// </summary>
+    public async Task<SharedMatchStart> StartSharedMatchAsync(Guid playerId)
     {
         await using var c = await db.OpenConnectionAsync();
         await using var tx = await c.BeginTransactionAsync();
         var m = await RequireOwnerAsync(c, tx, playerId);
         await c.ExecAsync("SELECT 1 FROM parties WHERE id = @p FOR UPDATE", tx, ("p", m.PartyId));
         var existing = await GetActiveMatchAsync(c, tx, m.PartyId);
+        SharedMatchDto? ended = null;
         if (existing is not null)
         {
-            await tx.CommitAsync();
-            return existing;
+            var playing = await c.ListAsync(StillPlayingSql("player_id"), tx, r => r.GetGuid(0), ("m", existing.Id), ("p", m.PartyId));
+            if (playing.Contains(playerId))
+            {
+                await tx.CommitAsync();
+                return new SharedMatchStart(existing, null);
+            }
+
+            if (playing.Count > 0)
+            {
+                throw new PartyException(409, ErrorCodes.MatchActive, "The party's shared match is still running for other players.");
+            }
+
+            ended = await EndMatchCoreAsync(c, tx, existing.Id, clock.GetUtcNow());
         }
 
         var match = new SharedMatchDto(Guid.NewGuid(), SharedMatchStatus.Active, playerId, clock.GetUtcNow(), null);
@@ -242,8 +263,62 @@ public sealed class PartyService(NpgsqlDataSource db, IOptions<ServerOptions> op
             FROM party_members WHERE party_id = @p AND left_at IS NULL
             """, tx, ("m", match.Id), ("owner", playerId), ("t", match.StartedAt), ("p", m.PartyId));
         await tx.CommitAsync();
-        return match;
+        return new SharedMatchStart(match, ended);
     }
+
+    /// <summary>
+    /// A participant stopped counting in a shared match. Only that player's participation ends (their later events
+    /// no longer count for this match). When no accepted participant is still playing, the match ends.
+    /// </summary>
+    /// <param name="finishedAt">When the player stopped (may be earlier when delivered after a reconnect).</param>
+    /// <returns>The match, and whether this call ended it.</returns>
+    public async Task<(Guid PartyId, SharedMatchDto Match, bool Ended)> FinishSharedMatchAsync(Guid playerId, Guid matchId, DateTimeOffset finishedAt)
+    {
+        await using var c = await db.OpenConnectionAsync();
+        await using var tx = await c.BeginTransactionAsync();
+        var m = await RequireMemberAsync(c, tx, playerId);
+        await c.ExecAsync("SELECT 1 FROM parties WHERE id = @p FOR UPDATE", tx, ("p", m.PartyId));
+        var active = await GetActiveMatchAsync(c, tx, m.PartyId);
+        if (active is null || active.Id != matchId)
+        {
+            throw new PartyException(404, ErrorCodes.NotFound, "No such active shared match.");
+        }
+
+        var now = clock.GetUtcNow();
+        var at = finishedAt > now ? now : finishedAt < active.StartedAt ? active.StartedAt : finishedAt;
+        await c.ExecAsync("""
+            UPDATE shared_match_participants SET finished_at = @t
+            WHERE match_id = @m AND player_id = @x AND response = 1 AND finished_at IS NULL
+            """, tx, ("t", at), ("m", matchId), ("x", playerId));
+        var stillPlaying = (await c.ListAsync(StillPlayingSql("COUNT(*)"), tx, r => r.GetInt64(0), ("m", matchId), ("p", m.PartyId))).Single();
+        var match = active;
+        var ended = false;
+        if (stillPlaying == 0)
+        {
+            match = await EndMatchCoreAsync(c, tx, matchId, now);
+            ended = true;
+        }
+
+        await tx.CommitAsync();
+        return (m.PartyId, match, ended);
+    }
+
+    private static async Task<SharedMatchDto> EndMatchCoreAsync(NpgsqlConnection c, NpgsqlTransaction tx, Guid matchId, DateTimeOffset now)
+    {
+        await c.ExecAsync("UPDATE shared_matches SET status = 2, ended_at = @t WHERE id = @id AND status = 1", tx, ("t", now), ("id", matchId));
+        return (await c.ListAsync("SELECT id, status, started_by, started_at, ended_at FROM shared_matches WHERE id = @id", tx,
+            ReadMatch, ("id", matchId))).Single();
+    }
+
+    /// <summary>Accepted participants that have not finished and are still in the party (a player who left never keeps a match open).</summary>
+    private static string StillPlayingSql(string select) => $"""
+        SELECT {select} FROM shared_match_participants sp
+        WHERE sp.match_id = @m AND sp.response = 1 AND sp.finished_at IS NULL
+          AND EXISTS (SELECT 1 FROM party_members pm WHERE pm.party_id = @p AND pm.player_id = sp.player_id AND pm.left_at IS NULL)
+        """;
+
+    private static DateTimeOffset? EarliestEnd(DateTimeOffset? matchEnded, DateTimeOffset? finished) =>
+        matchEnded is { } a && finished is { } b ? (a < b ? a : b) : matchEnded ?? finished;
 
     public async Task<(Guid PartyId, SharedMatchDto Match)> RespondSharedMatchAsync(Guid playerId, Guid matchId, bool accept)
     {
@@ -378,11 +453,14 @@ public sealed class PartyService(NpgsqlDataSource db, IOptions<ServerOptions> op
             {
                 if (!matchCache.TryGetValue(sid, out var info))
                 {
+                    // A participant's part ends when they finished (stopped counting), even if the match goes on.
                     info = (await c.ListAsync("""
-                        SELECT s.party_id, s.started_at, s.ended_at,
-                               EXISTS (SELECT 1 FROM shared_match_participants p WHERE p.match_id = s.id AND p.player_id = @x AND p.response = 1)
-                        FROM shared_matches s WHERE s.id = @id
-                        """, tx, r => ((Guid, DateTimeOffset, DateTimeOffset?, bool)?)(r.GetGuid(0), r.Ts(1), r.NTs(2), r.GetBoolean(3)),
+                        SELECT s.party_id, s.started_at, s.ended_at, p.finished_at, p.player_id IS NOT NULL
+                        FROM shared_matches s
+                        LEFT JOIN shared_match_participants p ON p.match_id = s.id AND p.player_id = @x AND p.response = 1
+                        WHERE s.id = @id
+                        """, tx, r => ((Guid, DateTimeOffset, DateTimeOffset?, bool)?)(r.GetGuid(0), r.Ts(1),
+                            EarliestEnd(r.NTs(2), r.NTs(3)), r.GetBoolean(4)),
                         ("id", sid), ("x", playerId))).FirstOrDefault();
                     matchCache[sid] = info;
                 }
@@ -554,7 +632,9 @@ public sealed class PartyService(NpgsqlDataSource db, IOptions<ServerOptions> op
                    COALESCE(SUM(e.delta), 0)::int,
                    COALESCE(SUM(CASE WHEN e.verified AND e.kind IN (0, 1) AND e.shared_match_id = @m THEN e.delta END), 0)::int,
                    COALESCE(SUM(CASE WHEN e.shared_match_id = @m THEN e.delta END), 0)::int,
-                   (SELECT sp.response FROM shared_match_participants sp WHERE sp.match_id = @m AND sp.player_id = pm.player_id)
+                   (SELECT sp.response FROM shared_match_participants sp WHERE sp.match_id = @m AND sp.player_id = pm.player_id),
+                   EXISTS (SELECT 1 FROM shared_match_participants sp WHERE sp.match_id = @m AND sp.player_id = pm.player_id
+                           AND sp.response = 1 AND sp.finished_at IS NOT NULL)
             FROM party_members pm
             JOIN players pl ON pl.id = pm.player_id
             LEFT JOIN chest_events e ON e.party_id = pm.party_id AND e.player_id = pm.player_id
@@ -568,7 +648,8 @@ public sealed class PartyService(NpgsqlDataSource db, IOptions<ServerOptions> op
                 r.GetGuid(0), r.GetString(1), (PartyRole)r.GetInt16(2), presence.IsOnline(r.GetGuid(0)), share, r.GetBoolean(4),
                 share && active is not null ? new CountPair(r.GetInt32(7), r.GetInt32(8)) : null,
                 share ? new CountPair(r.GetInt32(5), r.GetInt32(6)) : null,
-                r.IsDBNull(9) ? null : (ParticipantResponse)r.GetInt16(9));
+                r.IsDBNull(9) ? null : (ParticipantResponse)r.GetInt16(9),
+                r.GetBoolean(10));
         }, ("p", partyId), ("m", active?.Id ?? Guid.Empty));
 
         // Same definition as the final match result in history, so a member leaving mid-match changes nothing.

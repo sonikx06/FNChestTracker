@@ -80,7 +80,6 @@
                                              IsChecked="{Binding TrackingMode, Converter={StaticResource EnumEquals}, ConverterParameter=Automatic}" />
                             </UniformGrid>
                         </Border>
-                        <CheckBox Content="{DynamicResource Set.AutoStart}" IsChecked="{Binding AutoStartMatch}" Margin="0,12,0,4" />
 
                         <DockPanel Margin="0,10,0,0">
                             <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
@@ -375,15 +374,6 @@
                             <TextBlock Text="{DynamicResource Det.Sensitivity}" Style="{StaticResource SliderLabel}" />
                         </DockPanel>
                         <Slider Minimum="0" Maximum="100" Value="{Binding Sensitivity}" IsSnapToTickEnabled="True" TickFrequency="1" />
-                        <DockPanel Margin="0,6,0,0">
-                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                                <TextBlock Text="{Binding CooldownSeconds, StringFormat={}{0:0.0}}" FontWeight="SemiBold" />
-                                <TextBlock Text=" " />
-                                <TextBlock Text="{DynamicResource Common.Seconds}" Foreground="{StaticResource Brush.TextMuted}" />
-                            </StackPanel>
-                            <TextBlock Text="{DynamicResource Det.Cooldown}" Style="{StaticResource SliderLabel}" />
-                        </DockPanel>
-                        <Slider Minimum="0.5" Maximum="15" Value="{Binding CooldownSeconds}" />
                         <TextBlock Text="{DynamicResource Set.DetectionLink}" Style="{StaticResource Text.Caption}" Margin="0,8,0,0" />
                     </StackPanel>
                 </Border>

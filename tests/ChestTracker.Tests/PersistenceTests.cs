@@ -111,6 +111,7 @@ public class PersistenceTests : IDisposable
     public void Corrupt_database_is_quarantined_and_restored_from_backup()
     {
         var engine = _db.CreateEngine(_clock);
+        engine.StartMatch();
         engine.AddChestManual(false);
         engine.Shutdown();
         _db.Backups.CreateBackup(_db.Db, "test");
@@ -197,10 +198,12 @@ public class PersistenceTests : IDisposable
     public void Reset_all_data_keeps_current_session_usable()
     {
         var engine = _db.CreateEngine(_clock);
+        engine.StartMatch();
         engine.AddChestManual(false);
         engine.EndMatch();
 
         engine.ResetAllData();
+        engine.StartMatch();
         engine.AddChestManual(false);
 
         var s = engine.GetSnapshot();

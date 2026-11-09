@@ -80,11 +80,28 @@ public sealed class PartyHub(PartyService parties, PresenceTracker presence, Not
 
     public async Task<SharedMatchDto> StartSharedMatch()
     {
-        var match = await Guard(() => parties.StartSharedMatchAsync(PlayerId));
+        var start = await Guard(() => parties.StartSharedMatchAsync(PlayerId));
         var partyId = (await parties.GetPartyIdAsync(PlayerId))!.Value;
-        await Clients.Group(Notifier.Group(partyId)).SendAsync(ClientMethods.SharedMatchStarted, match);
+        if (start.Ended is { } ended)
+        {
+            await Clients.Group(Notifier.Group(partyId)).SendAsync(ClientMethods.SharedMatchEnded, ended);
+        }
+
+        await Clients.Group(Notifier.Group(partyId)).SendAsync(ClientMethods.SharedMatchStarted, start.Match);
         await notifier.BroadcastStateAsync(partyId);
-        return match;
+        return start.Match;
+    }
+
+    /// <summary>This player stopped counting; the shared match goes on for the others (it ends when nobody plays).</summary>
+    public async Task FinishSharedMatch(Guid matchId, DateTimeOffset finishedAt)
+    {
+        var (partyId, match, ended) = await Guard(() => parties.FinishSharedMatchAsync(PlayerId, matchId, finishedAt));
+        if (ended)
+        {
+            await Clients.Group(Notifier.Group(partyId)).SendAsync(ClientMethods.SharedMatchEnded, match);
+        }
+
+        await notifier.BroadcastStateAsync(partyId);
     }
 
     public async Task RespondSharedMatch(Guid matchId, bool accept)

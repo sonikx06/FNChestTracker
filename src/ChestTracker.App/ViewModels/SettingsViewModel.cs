@@ -194,12 +194,6 @@ public sealed partial class SettingsViewModel : ObservableObject
         set => Update(Model.TrackingMode, value, v => Model.TrackingMode = v, SettingsSection.Mode);
     }
 
-    public bool AutoStartMatch
-    {
-        get => Model.Tracking.AutoStartMatch;
-        set => Update(Model.Tracking.AutoStartMatch, value, v => Model.Tracking.AutoStartMatch = v, SettingsSection.Tracking);
-    }
-
     public double ManualDebounceMs
     {
         get => Model.Tracking.ManualDebounceMs;
@@ -468,18 +462,6 @@ public sealed partial class SettingsViewModel : ObservableObject
         set => Update(Model.Detection.Sensitivity, value, v => Model.Detection.Sensitivity = v, SettingsSection.Detection);
     }
 
-    public double CooldownSeconds
-    {
-        get => Model.Detection.CooldownSeconds;
-        set => Update(Model.Detection.CooldownSeconds, Math.Round(value * 2) / 2, v => Model.Detection.CooldownSeconds = v, SettingsSection.Detection);
-    }
-
-    public double SamplingFps
-    {
-        get => Model.Detection.SamplingFps;
-        set => Update(Model.Detection.SamplingFps, Math.Round(value), v => Model.Detection.SamplingFps = v, SettingsSection.Detection);
-    }
-
     public LocalizedOption<CaptureBackend> SelectedBackend
     {
         get => Backends.First(b => b.Value == Model.Detection.Backend);
@@ -506,31 +488,6 @@ public sealed partial class SettingsViewModel : ObservableObject
         set => Update(Model.Detection.TestMode, value, v => Model.Detection.TestMode = v, SettingsSection.Detection);
     }
 
-    public IReadOnlyList<LocalizedOption<DetectionEngine>> Engines { get; } =
-        Enum.GetValues<DetectionEngine>().Select(e => new LocalizedOption<DetectionEngine>(e, "Det.Engine." + e)).ToList();
-
-    public LocalizedOption<DetectionEngine> SelectedEngine
-    {
-        get => Engines.FirstOrDefault(e => e.Value == Model.Detection.Engine) ?? Engines[0];
-        set
-        {
-            if (value is not null && Update(Model.Detection.Engine, value.Value, v => Model.Detection.Engine = v, SettingsSection.Detection))
-            {
-                OnPropertyChanged(nameof(IsYolo));
-            }
-        }
-    }
-
-    public bool IsYolo => Model.Detection.Engine == DetectionEngine.Yolo;
-
-    public string YoloModelPath
-    {
-        get => Model.Detection.YoloModelPath;
-        set => Update(Model.Detection.YoloModelPath, value?.Trim().Trim('"') ?? "", v => Model.Detection.YoloModelPath = v, SettingsSection.Detection);
-    }
-
-    public string YoloModelPlaceholder => Capture.DetectionService.DefaultModelPath;
-
     public double YoloConfidence
     {
         get => Model.Detection.YoloConfidence;
@@ -543,72 +500,10 @@ public sealed partial class SettingsViewModel : ObservableObject
         set => Update(Model.Detection.DebugView, value, v => Model.Detection.DebugView = v, SettingsSection.Detection);
     }
 
-    [RelayCommand]
-    private void BrowseModel()
-    {
-        var dialog = new Microsoft.Win32.OpenFileDialog
-        {
-            Filter = "ONNX (*.onnx)|*.onnx",
-            CheckFileExists = true,
-        };
-        if (dialog.ShowDialog() == true)
-        {
-            YoloModelPath = dialog.FileName;
-        }
-    }
-
     public bool QueueUncertain
     {
         get => Model.Detection.QueueUncertain;
         set => Update(Model.Detection.QueueUncertain, value, v => Model.Detection.QueueUncertain = v, SettingsSection.Detection);
-    }
-
-    public double RoiWidth
-    {
-        get => Model.Detection.RoiWidth;
-        set => Update(Model.Detection.RoiWidth, Math.Round(value, 2), v => Model.Detection.RoiWidth = v, SettingsSection.Detection);
-    }
-
-    public double RoiHeight
-    {
-        get => Model.Detection.RoiHeight;
-        set => Update(Model.Detection.RoiHeight, Math.Round(value, 2), v => Model.Detection.RoiHeight = v, SettingsSection.Detection);
-    }
-
-    public double RoiCenterY
-    {
-        get => Model.Detection.RoiCenterY;
-        set => Update(Model.Detection.RoiCenterY, Math.Round(value, 2), v => Model.Detection.RoiCenterY = v, SettingsSection.Detection);
-    }
-
-    public int GoldHueMin
-    {
-        get => Model.Detection.GoldHueMin;
-        set => Update(Model.Detection.GoldHueMin, Math.Min(value, Model.Detection.GoldHueMax), v => Model.Detection.GoldHueMin = v, SettingsSection.Detection);
-    }
-
-    public int GoldHueMax
-    {
-        get => Model.Detection.GoldHueMax;
-        set => Update(Model.Detection.GoldHueMax, Math.Max(value, Model.Detection.GoldHueMin), v => Model.Detection.GoldHueMax = v, SettingsSection.Detection);
-    }
-
-    public int GoldSaturationMin
-    {
-        get => Model.Detection.GoldSaturationMin;
-        set => Update(Model.Detection.GoldSaturationMin, value, v => Model.Detection.GoldSaturationMin = v, SettingsSection.Detection);
-    }
-
-    public int GoldValueMin
-    {
-        get => Model.Detection.GoldValueMin;
-        set => Update(Model.Detection.GoldValueMin, value, v => Model.Detection.GoldValueMin = v, SettingsSection.Detection);
-    }
-
-    public bool UseTemplate
-    {
-        get => Model.Detection.UseTemplate;
-        set => Update(Model.Detection.UseTemplate, value, v => Model.Detection.UseTemplate = v, SettingsSection.Detection);
     }
 
     [RelayCommand]
@@ -617,15 +512,7 @@ public sealed partial class SettingsViewModel : ObservableObject
         var d = new DetectionSettings();
         var m = Model.Detection;
         m.Sensitivity = d.Sensitivity;
-        m.CooldownSeconds = d.CooldownSeconds;
-        m.SamplingFps = d.SamplingFps;
-        m.RoiWidth = d.RoiWidth;
-        m.RoiHeight = d.RoiHeight;
-        m.RoiCenterY = d.RoiCenterY;
-        m.GoldHueMin = d.GoldHueMin;
-        m.GoldHueMax = d.GoldHueMax;
-        m.GoldSaturationMin = d.GoldSaturationMin;
-        m.GoldValueMin = d.GoldValueMin;
+        m.YoloConfidence = d.YoloConfidence;
         OnPropertyChanged(string.Empty);
         Changed(SettingsSection.Detection);
     }

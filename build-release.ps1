@@ -96,6 +96,11 @@ Copy-Lf (Join-Path $root 'deploy/server/docker-compose.postgres.yml') (Join-Path
 
 # ------------------------------------------------------------------ 4. docs
 Step 'Copying documentation'
+foreach ($dir in @($clientDir, $winDir, $linuxDir, $docsDir)) {
+    Copy-Item (Join-Path $root 'LICENSE') $dir
+    Copy-Item (Join-Path $root 'THIRD-PARTY-NOTICES.md') $dir
+}
+Copy-Item (Join-Path $root 'CONTRIBUTING.md') $docsDir
 Copy-Item (Join-Path $root 'README.md') $docsDir
 Copy-Item (Join-Path $root 'deploy/docs/*.md') $docsDir
 New-Item -ItemType Directory -Force (Join-Path $docsDir 'discord-assets') | Out-Null
@@ -141,6 +146,35 @@ if (-not $SkipZip) {
     if (Test-Path $zip) { Remove-Item $zip -Force }
     Compress-Archive -Path $out -DestinationPath $zip -CompressionLevel Optimal
     Write-Host ("ZIP: {0} ({1:N1} MB)" -f $zip, ((Get-Item $zip).Length / 1MB)) -ForegroundColor Green
+
+    # GitHub release assets: one download per audience, each extracting to a single named folder.
+    Step 'Creating release assets in dist/'
+    $dist = Join-Path $root 'dist'
+    if (Test-Path $dist) { Remove-Item $dist -Recurse -Force }
+    New-Item -ItemType Directory -Force $dist | Out-Null
+    $staging = Join-Path $dist '_staging'
+    $assets = @(
+        @{ Name = 'FortniteChestTracker-win-x64.zip'; Source = $clientDir; Folder = 'FortniteChestTracker' },
+        @{ Name = 'FortniteChestTracker-Server-win-x64.zip'; Source = $winDir; Folder = 'FortniteChestTracker-Server' },
+        @{ Name = 'FortniteChestTracker-Server-linux-x64.zip'; Source = $linuxDir; Folder = 'FortniteChestTracker-Server' }
+    )
+    foreach ($asset in $assets) {
+        if (Test-Path $staging) { Remove-Item $staging -Recurse -Force }
+        $folder = Join-Path $staging $asset.Folder
+        New-Item -ItemType Directory -Force $folder | Out-Null
+        Copy-Item (Join-Path $asset.Source '*') $folder -Recurse
+        if ($asset.Source -ne $clientDir) {
+            Copy-Item (Join-Path $serverDir 'reverse-proxy') $folder -Recurse
+            Copy-Item (Join-Path $serverDir 'docker-compose.postgres.yml') $folder
+            Copy-Item (Join-Path $root 'deploy/docs/SERVER-SETUP.md') $folder
+        }
+        Compress-Archive -Path $folder -DestinationPath (Join-Path $dist $asset.Name) -CompressionLevel Optimal
+    }
+    Remove-Item $staging -Recurse -Force
+    Get-ChildItem $dist -Filter *.zip | Sort-Object Name | ForEach-Object {
+        "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant())  $($_.Name)"
+    } | Set-Content (Join-Path $dist 'SHA256SUMS.txt') -Encoding ascii
+    Get-ChildItem $dist | ForEach-Object { Write-Host ("  {0} ({1:N1} MB)" -f $_.Name, ($_.Length / 1MB)) -ForegroundColor Green }
 }
 
 $size = (Get-ChildItem $out -Recurse -File | Measure-Object Length -Sum).Sum / 1MB

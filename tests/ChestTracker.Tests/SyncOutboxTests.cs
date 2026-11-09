@@ -15,6 +15,7 @@ public class SyncOutboxTests : IDisposable
     {
         var engine = _db.CreateEngine(_clock);
         var outbox = new SyncOutbox(_db.Db);
+        engine.StartMatch();                       // counting needs a running match
         engine.AddChestManual(false);              // before joining: private
         var party = Guid.NewGuid();
         outbox.BeginParty(party);
@@ -35,6 +36,7 @@ public class SyncOutboxTests : IDisposable
     {
         var engine = _db.CreateEngine(_clock, new Core.Tracking.TrackingOptions { ManualDebounce = TimeSpan.Zero });
         var outbox = new SyncOutbox(_db.Db);
+        engine.StartMatch();                       // counting needs a running match
         var first = Guid.NewGuid();
         outbox.BeginParty(first);
         _clock.AdvanceSeconds(5);
@@ -66,6 +68,7 @@ public class SyncOutboxTests : IDisposable
     {
         var engine = _db.CreateEngine(_clock);
         var outbox = new SyncOutbox(_db.Db);
+        engine.StartMatch();                       // counting needs a running match
         outbox.BeginParty(Guid.NewGuid());
         engine.AddChestManual(false);
         engine.AddChestManual(false);
@@ -104,6 +107,7 @@ public class SyncOutboxTests : IDisposable
     {
         var engine = _db.CreateEngine(_clock);
         var outbox = new SyncOutbox(_db.Db);
+        engine.StartMatch();                       // counting needs a running match
         outbox.BeginParty(Guid.NewGuid());
         engine.AddChestManual(false);
         outbox.EnqueueNew();

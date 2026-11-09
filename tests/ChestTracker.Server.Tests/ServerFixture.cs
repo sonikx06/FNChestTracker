@@ -281,9 +281,14 @@ public sealed class TestDevice : IAsyncDisposable
     public SqliteDatabase Database { get; }
     public TrackingEngine Engine { get; }
 
-    /// <summary>Opens a chest a few "seconds" after the previous one.</summary>
+    /// <summary>Opens a chest a few "seconds" after the previous one (starting a match first if none is running).</summary>
     public void OpenChest()
     {
+        if (Engine.CurrentMatch is null)
+        {
+            Engine.StartMatch();
+        }
+
         Clock.Step(3);
         Engine.AddChestManual(fromHotkey: true);
     }

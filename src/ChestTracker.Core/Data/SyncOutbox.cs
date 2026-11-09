@@ -166,6 +166,47 @@ public sealed class SyncOutbox(SqliteDatabase db)
         update.Bind("$l", localMatchId).Bind("$s", sharedMatchId).ExecuteNonQuery();
     });
 
+    /// <summary>
+    /// The player stopped counting in a local match. If it is linked to a shared match, the end of this player's
+    /// participation is recorded so it can be sent to the server (now or after a reconnect).
+    /// </summary>
+    public void MarkFinished(Guid localMatchId, DateTimeOffset at) => db.Run(c =>
+    {
+        using var cmd = c.Command("UPDATE shared_match_links SET finished_at = $t WHERE local_match_id = $l AND finished_at IS NULL");
+        return cmd.Bind("$t", at).Bind("$l", localMatchId).ExecuteNonQuery();
+    });
+
+    /// <summary>Shared matches whose end of participation has not reached the server yet.</summary>
+    public IReadOnlyList<(Guid SharedMatchId, DateTimeOffset FinishedAt)> PendingFinishes() => db.Run(c =>
+    {
+        // Linked local matches that ended while sync was not attached (app closed, crash recovery) finished too.
+        using (var ended = c.Command("""
+            UPDATE shared_match_links SET finished_at = (SELECT m.ended_at FROM matches m WHERE m.id = shared_match_links.local_match_id)
+            WHERE finished_at IS NULL AND finish_sent = 0
+              AND EXISTS (SELECT 1 FROM matches m WHERE m.id = shared_match_links.local_match_id AND m.ended_at IS NOT NULL)
+            """))
+        {
+            ended.ExecuteNonQuery();
+        }
+
+        using var cmd = c.Command("SELECT shared_match_id, MAX(finished_at) FROM shared_match_links WHERE finished_at IS NOT NULL AND finish_sent = 0 GROUP BY shared_match_id");
+        using var r = cmd.ExecuteReader();
+        var list = new List<(Guid, DateTimeOffset)>();
+        while (r.Read())
+        {
+            list.Add((Guid.Parse(r.GetString(0)), DateTimeOffset.FromUnixTimeMilliseconds(r.GetInt64(1))));
+        }
+
+        return (IReadOnlyList<(Guid, DateTimeOffset)>)list;
+    });
+
+    /// <summary>The server knows this player is done with the shared match (or the match is over anyway).</summary>
+    public void FinishSent(Guid sharedMatchId, DateTimeOffset at) => db.Run(c =>
+    {
+        using var cmd = c.Command("UPDATE shared_match_links SET finished_at = COALESCE(finished_at, $t), finish_sent = 1 WHERE shared_match_id = $s");
+        return cmd.Bind("$t", at).Bind("$s", sharedMatchId).ExecuteNonQuery();
+    });
+
     public Guid? GetSharedMatch(Guid localMatchId) => db.Run(c =>
     {
         using var cmd = c.Command("SELECT shared_match_id FROM shared_match_links WHERE local_match_id = $l");

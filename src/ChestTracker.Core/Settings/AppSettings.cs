@@ -90,7 +90,8 @@ public sealed class GeneralSettings
 
 public sealed class TrackingSettings
 {
-    public bool AutoStartMatch { get; set; } = true;
+    /// <summary>No longer used: chests count only inside a match started with the match hotkey or button. Kept so old settings files load.</summary>
+    public bool AutoStartMatch { get; set; }
     public int ManualDebounceMs { get; set; } = 300;
     public double HybridMergeWindowSeconds { get; set; } = 2.5;
     public int ResumeWindowMinutes { get; set; } = 10;
@@ -151,11 +152,10 @@ public sealed class DetectionSettings
 
     public bool QueueUncertain { get; set; } = true;
 
-    /// <summary>YOLOv8 ONNX model (default; the model ships with the app) or the experimental heuristic gold-burst detector.
-    /// Only one engine runs at a time, so the two can never both count the same opening.</summary>
+    /// <summary>Always <see cref="DetectionEngine.Yolo"/> with the built-in model: older values are reset on load.</summary>
     public DetectionEngine Engine { get; set; } = DetectionEngine.Yolo;
 
-    /// <summary>YOLOv8 model exported to ONNX (see tools/yolo). Empty = the bundled models/best.onnx next to the app.</summary>
+    /// <summary>No longer used: the built-in models/best.onnx is always used. Older paths are cleared on load.</summary>
     public string YoloModelPath { get; set; } = "";
 
     /// <summary>Minimum per-frame detection confidence for the YOLO model.</summary>
@@ -324,10 +324,9 @@ public sealed class AppSettings
         Detection ??= new DetectionSettings();
         Detection.YoloModelPath ??= "";
         Detection.YoloConfidence = double.IsFinite(Detection.YoloConfidence) ? Math.Clamp(Detection.YoloConfidence, 0.05, 0.95) : 0.35;
-        if (!Enum.IsDefined(Detection.Engine))
-        {
-            Detection.Engine = DetectionEngine.Yolo;
-        }
+        // The built-in model is the only detector: saved engine choices and model paths from older versions are ignored.
+        Detection.Engine = DetectionEngine.Yolo;
+        Detection.YoloModelPath = "";
 
         Hotkeys.Bindings ??= [];
 
@@ -389,7 +388,6 @@ public sealed class AppSettings
         ManualDebounce = TimeSpan.FromMilliseconds(Tracking.ManualDebounceMs),
         AutomaticCooldown = TimeSpan.FromSeconds(Detection.CooldownSeconds),
         HybridMergeWindow = TimeSpan.FromSeconds(Tracking.HybridMergeWindowSeconds),
-        AutoStartMatch = Tracking.AutoStartMatch,
         ResumeWindow = TimeSpan.FromMinutes(Tracking.ResumeWindowMinutes),
     };
 

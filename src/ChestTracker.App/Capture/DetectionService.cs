@@ -18,9 +18,12 @@ public enum DetectionStatus
     Candidate,
     Detected,
     Error,
+
+    /// <summary>Automatic/hybrid mode, but no match is running: nothing is captured or counted.</summary>
+    Paused,
 }
 
-/// <param name="Detail">Supporting evidence (YOLO: frames per state, confidences, state path).</param>
+/// <param name="Detail">Supporting evidence (frames per state, confidences, state path).</param>
 public sealed record DetectionLogEntry(DateTimeOffset Timestamp, DetectionOutcome Outcome, double Confidence, string Result, string? Detail = null);
 
 public sealed class FrameAnalyzedEventArgs(FrameAnalysis analysis, double confidence, DetectorState state, PipelineFrame? yolo = null) : EventArgs
@@ -29,102 +32,76 @@ public sealed class FrameAnalyzedEventArgs(FrameAnalysis analysis, double confid
     public double Confidence { get; } = confidence;
     public DetectorState State { get; } = state;
 
-    /// <summary>Set when the YOLO engine analysed the frame.</summary>
+    /// <summary>The model's detections, tracks and openings for this frame.</summary>
     public PipelineFrame? Yolo { get; } = yolo;
 }
 
 /// <summary>
-/// Runs capture → analysis → detector only while the tracking mode is automatic or hybrid. Exactly one engine is
-/// active (YOLO by default, or the experimental heuristic), so two detectors can never count the same opening.
-/// YOLO frames go to a dedicated inference thread (latest frame wins, older ones are dropped), so neither the
-/// capture callback nor the UI thread ever waits for the model. If capture or the model fails, it reports the
-/// status and manual tracking keeps working untouched.
+/// Automatic chest detection with the built-in YOLOv8 model (<c>models\best.onnx</c>), the only detector.
+/// Capture and inference run only while the tracking mode is automatic or hybrid AND a match is running
+/// (<see cref="MatchDetectionController"/>): the match button and the match hotkey start and stop counting.
+/// Frames go to a dedicated inference thread (latest frame wins), so neither the capture callback nor the UI thread
+/// waits for the model. If capture or the model fails, the status says so and manual tracking keeps working.
 /// </summary>
 public sealed class DetectionService : IDisposable
 {
     private readonly TrackingEngine _engine;
-    private readonly string _templatePath;
-    private readonly FrameAnalyzer _analyzer = new();
+    private readonly MatchDetectionController _controller;
     private readonly object _gate = new();
     private readonly Timer _watchdog;
+    private readonly InferenceWorker _worker;
+    private readonly string _modelPath;
     private ICaptureSource? _source;
-    private ChestDetector _detector;
     private DetectionSettings _settings;
     private TrackingMode _mode;
     private DetectionStatus _status = DetectionStatus.Disabled;
     private DateTimeOffset _detectedUntil;
-    private volatile bool _captureTemplateRequested;
     private bool _disposed;
-    private YoloChestPipeline? _yolo;
-    private string? _yoloPath;
-    private readonly InferenceWorker _worker;
+    private bool _modelAttempted;
     private DateTimeOffset _nextRejectLog;
 
-    public DetectionService(TrackingEngine engine, DetectionSettings settings, TrackingMode mode, string templatePath)
+    /// <param name="modelPath">Built-in model; tests and tools may pass another file, the app never does.</param>
+    public DetectionService(TrackingEngine engine, DetectionSettings settings, TrackingMode mode, string? modelPath = null)
     {
         _engine = engine;
-        _templatePath = templatePath;
         _settings = Clone(settings);
         _mode = mode;
-        _detector = new ChestDetector(Tuning(_settings));
-        try
-        {
-            _analyzer.LoadTemplate(templatePath);
-        }
-        catch (Exception ex)
-        {
-            Log.Warn("Could not load detection template", ex);
-        }
-
-        _worker = new InferenceWorker(ProcessYolo);
+        _modelPath = modelPath ?? BuiltInModelPath;
+        _controller = new MatchDetectionController(engine);
+        _controller.CountingChanged += (_, _) => ThreadPool.QueueUserWorkItem(_ => OnCountingChanged());
+        _worker = new InferenceWorker(ProcessFrame);
         IsCaptureSupported = WgcCaptureSource.IsSupported();
         _watchdog = new Timer(_ => Watchdog(), null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(3));
     }
 
     public event EventHandler? StatusChanged;
 
-    /// <summary>Raised on a worker thread for every analysed frame (calibration UI).</summary>
+    /// <summary>Raised on the inference thread for every analysed frame (detection page).</summary>
     public event EventHandler<FrameAnalyzedEventArgs>? FrameAnalyzed;
 
-    /// <summary>Raised on a worker thread for every finished candidate.</summary>
+    /// <summary>Raised on the inference thread for every finished opening.</summary>
     public event EventHandler<DetectionLogEntry>? Decision;
 
-    public event EventHandler? TemplateChanged;
+    /// <summary>Capture rate while counting: enough frames to see a chest closed, then open, in consecutive frames.</summary>
+    public const double SamplingFps = 8;
+
+    /// <summary>The model that ships with the app (published next to the executable). There is no other.</summary>
+    public static string BuiltInModelPath => BuiltInModel.PathIn(AppContext.BaseDirectory);
 
     public bool IsCaptureSupported { get; }
 
-    public bool HasTemplate => _analyzer.HasTemplate;
-
-    /// <summary>Set while the calibration page is visible; previews cost extra CPU.</summary>
+    /// <summary>Set while the detection page is visible; previews cost extra CPU.</summary>
     public bool PreviewRequested { get; set; }
 
     public string? LastError { get; private set; }
 
-    /// <summary>Why the YOLO model is not running (missing file, invalid model), null when it is loaded or unused.</summary>
+    /// <summary>Why the built-in model is not available (missing or damaged file), null when it is loaded.</summary>
     public string? ModelError { get; private set; }
 
-    /// <summary>Loaded model description, e.g. "chest-yolov8n.onnx · 640 px · 5 classes (model metadata)".</summary>
+    /// <summary>Loaded model description, e.g. "best.onnx · 640 px · closed_chest, open_chest · DirectML (GPU)".</summary>
     public string? ModelDescription { get; private set; }
 
-    public bool UsesYolo => _settings.Engine == DetectionEngine.Yolo;
-
-    /// <summary>Capture rate while YOLO runs: enough frames to see a chest closed, then open, in consecutive frames.</summary>
-    public const double YoloSamplingFps = 8;
-
-    /// <summary>The model that ships with the app (published next to the executable).</summary>
-    public static string BundledModelPath => Path.Combine(AppContext.BaseDirectory, "models", "best.onnx");
-
-    /// <summary>Model used when no path is configured: the bundled one (or the older chest-yolov8.onnx name).</summary>
-    public static string DefaultModelPath
-    {
-        get
-        {
-            var legacy = Path.Combine(AppContext.BaseDirectory, "models", "chest-yolov8.onnx");
-            return !File.Exists(BundledModelPath) && File.Exists(legacy) ? legacy : BundledModelPath;
-        }
-    }
-
-    /// <summary>Last inference time (ms) of the YOLO pipeline, 0 when not running.</summary>
+    /// <summary>Last inference time (ms), 0 when not running.</summary>
     public double LastInferenceMs { get; private set; }
 
     public string? TargetDescription { get; private set; }
@@ -136,6 +113,9 @@ public sealed class DetectionService : IDisposable
 
     public bool IsActiveMode => _mode is TrackingMode.Automatic or TrackingMode.Hybrid;
 
+    /// <summary>True while a match is running and detected openings are counted.</summary>
+    public bool IsCounting => _controller.IsCounting;
+
     public void Configure(DetectionSettings settings, TrackingMode mode)
     {
         bool restart;
@@ -144,16 +124,13 @@ public sealed class DetectionService : IDisposable
             var old = _settings;
             _settings = Clone(settings);
             restart = old.Backend != _settings.Backend || old.Target != _settings.Target
-                      || old.Engine != _settings.Engine || !string.Equals(old.YoloModelPath, _settings.YoloModelPath, StringComparison.OrdinalIgnoreCase)
-                      || Math.Abs(old.SamplingFps - _settings.SamplingFps) > 0.01
                       || !string.Equals(old.ProcessName, _settings.ProcessName, StringComparison.OrdinalIgnoreCase)
                       || _mode != mode;
             _mode = mode;
-            _detector.Tuning = Tuning(_settings);
-            if (_yolo?.Detector is OnnxYoloDetector onnx)
+            if (_controller.Pipeline is { Detector: OnnxYoloDetector onnx } pipeline)
             {
                 onnx.ConfidenceThreshold = (float)_settings.YoloConfidence;
-                _yolo.Options = TrackingOptionsFor(_settings);
+                pipeline.Options = YoloSettings.TrackingOptionsFor(_settings);
             }
         }
 
@@ -167,72 +144,61 @@ public sealed class DetectionService : IDisposable
     {
         StopCapture();
         _worker.Clear();
-        _detector.Reset();
-        lock (_gate)
-        {
-            _yolo?.Reset();
-        }
-
+        _controller.Pipeline?.Reset();
         Watchdog();
     }
 
-    /// <summary>Loads (or unloads) the ONNX model for the configured engine. Errors leave manual tracking untouched.</summary>
-    private void EnsureModelLocked(DetectionSettings settings)
+    /// <summary>Counting started or stopped (match button, match hotkey, shared match, crash recovery).</summary>
+    private void OnCountingChanged()
     {
-        if (settings.Engine != DetectionEngine.Yolo)
+        _worker.Clear();
+        if (_controller.IsCounting)
         {
-            _yolo?.Dispose();
-            _yolo = null;
-            _yoloPath = null;
-            ModelError = null;
-            ModelDescription = null;
-            return;
+            Log.Info("Counting started: chest detection active for the new match");
+            Watchdog();
         }
-
-        var path = string.IsNullOrWhiteSpace(settings.YoloModelPath) ? DefaultModelPath : settings.YoloModelPath.Trim();
-        if (_yolo is not null && string.Equals(path, _yoloPath, StringComparison.OrdinalIgnoreCase))
+        else
         {
-            return;
-        }
-
-        _yolo?.Dispose();
-        _yolo = null;
-        _yoloPath = path;
-        try
-        {
-            var detector = OnnxYoloDetector.Load(path, threads: Math.Max(1, Environment.ProcessorCount / 4));
-            detector.ConfidenceThreshold = (float)settings.YoloConfidence;
-            _yolo = new YoloChestPipeline(detector, TrackingOptionsFor(settings));
-            var info = detector.Info;
-            var roles = info.Labels.Roles;
-            ModelDescription = $"{Path.GetFileName(path)} · {info.InputSize} px · {info.Labels.Count} classes ({info.LabelSource}) · {info.Provider}"
-                               + (roles.Contains(ObjectRole.ChestOpening) ? "" : " · closed → open counts");
-            if (info.ProviderNote is { } note)
+            StopCapture();
+            lock (_gate)
             {
-                Log.Warn($"YOLO runs on the CPU. {note}");
+                SetStatusLocked(IsActiveMode ? DetectionStatus.Paused : DetectionStatus.Disabled);
             }
-            // Counting needs the same chest seen closed and then opened; chest_opening is optional.
-            ModelError = !roles.Contains(ObjectRole.ChestClosed) || !roles.Contains(ObjectRole.ChestOpened)
-                ? $"The model needs chest_closed and chest_opened classes (has: {string.Join(", ", info.Labels.Names)}): nothing will be counted."
-                : null;
-            Log.Info($"YOLO model loaded: {ModelDescription}; classes: {string.Join(", ", info.Labels.Names)}");
-        }
-        catch (Exception ex)
-        {
-            ModelError = ex is FileNotFoundException ? $"Model file not found: {path}" : ex.Message;
-            ModelDescription = null;
-            Log.Warn("YOLO model could not be loaded; manual tracking continues", ex);
+
+            Log.Info("Counting stopped: chest detection paused until the next match");
         }
     }
 
-    private static ChestTrackingOptions TrackingOptionsFor(DetectionSettings s) => YoloSettings.TrackingOptionsFor(s);
-
-    public void RequestTemplateCapture() => _captureTemplateRequested = true;
-
-    public void ClearTemplate()
+    /// <summary>Loads the built-in model once (at the first need) and keeps it for every match.</summary>
+    private void EnsureModelLocked(DetectionSettings settings)
     {
-        _analyzer.ClearTemplate(_templatePath);
-        TemplateChanged?.Invoke(this, EventArgs.Empty);
+        if (_controller.Pipeline is not null || _modelAttempted)
+        {
+            return;
+        }
+
+        _modelAttempted = true;
+        try
+        {
+            var detector = BuiltInModel.Load(_modelPath, threads: Math.Max(1, Environment.ProcessorCount / 4));
+            detector.ConfidenceThreshold = (float)settings.YoloConfidence;
+            _controller.Pipeline = new YoloChestPipeline(detector, YoloSettings.TrackingOptionsFor(settings));
+            var info = detector.Info;
+            ModelDescription = $"{Path.GetFileName(_modelPath)} · {info.InputSize} px · {string.Join(", ", info.Labels.Names)} · {info.Provider}";
+            ModelError = null;
+            if (info.ProviderNote is { } note)
+            {
+                Log.Warn($"Chest model runs on the CPU. {note}");
+            }
+
+            Log.Info($"Built-in chest model loaded: {ModelDescription}");
+        }
+        catch (BuiltInModelException ex)
+        {
+            ModelError = ex.Message;
+            ModelDescription = null;
+            Log.Warn("Built-in chest model unavailable; automatic detection is off, manual tracking continues", ex);
+        }
     }
 
     private void Watchdog()
@@ -255,6 +221,24 @@ public sealed class DetectionService : IDisposable
                     return;
                 }
 
+                // The model is loaded as soon as automatic detection is possible, so a missing or damaged file is
+                // reported right away and the first match does not wait for it.
+                EnsureModelLocked(settings);
+                if (_controller.Pipeline is null)
+                {
+                    StopCaptureLocked();
+                    LastError = ModelError;
+                    SetStatusLocked(DetectionStatus.Error);
+                    return;
+                }
+
+                if (!_controller.IsCounting)
+                {
+                    StopCaptureLocked();
+                    SetStatusLocked(DetectionStatus.Paused);
+                    return;
+                }
+
                 if (_source?.IsRunning == true)
                 {
                     if (_status == DetectionStatus.Detected && DateTimeOffset.UtcNow > _detectedUntil)
@@ -262,17 +246,6 @@ public sealed class DetectionService : IDisposable
                         SetStatusLocked(DetectionStatus.Running);
                     }
 
-                    return;
-                }
-            }
-
-            lock (_gate)
-            {
-                EnsureModelLocked(settings);
-                if (settings.Engine == DetectionEngine.Yolo && _yolo is null)
-                {
-                    SetStatusLocked(DetectionStatus.Error);
-                    LastError = ModelError;
                     return;
                 }
             }
@@ -299,7 +272,7 @@ public sealed class DetectionService : IDisposable
             source.Failed += OnSourceFailed;
             try
             {
-                source.Start(target, settings.Engine == DetectionEngine.Yolo ? Math.Max(settings.SamplingFps, YoloSamplingFps) : settings.SamplingFps);
+                source.Start(target, SamplingFps);
             }
             catch (Exception ex)
             {
@@ -314,8 +287,10 @@ public sealed class DetectionService : IDisposable
 
             lock (_gate)
             {
-                if (!IsActiveMode || _disposed)
+                if (!IsActiveMode || _disposed || !_controller.IsCounting || _source is not null)
                 {
+                    source.FrameCaptured -= OnFrame;
+                    source.Failed -= OnSourceFailed;
                     source.Dispose();
                     return;
                 }
@@ -323,8 +298,6 @@ public sealed class DetectionService : IDisposable
                 _source = source;
                 TargetDescription = target.Description;
                 LastError = null;
-                _analyzer.ResetMotion();
-                _detector.Reset();
                 SetStatusLocked(DetectionStatus.Running);
             }
         }
@@ -349,81 +322,41 @@ public sealed class DetectionService : IDisposable
 
     private void OnFrame(object? sender, CapturedFrame frame)
     {
-        DetectionSettings settings;
         lock (_gate)
         {
             if (!ReferenceEquals(sender, _source))
             {
                 return;
             }
-
-            settings = _settings;
         }
 
-        try
+        // The ticket records which match this frame belongs to; no match → the frame is not analysed at all.
+        if (_controller.Admit() is { } ticket)
         {
-            if (_captureTemplateRequested)
-            {
-                _captureTemplateRequested = false;
-                _analyzer.CaptureTemplate(frame, settings, _templatePath);
-                TemplateChanged?.Invoke(this, EventArgs.Empty);
-            }
-
-            if (settings.Engine == DetectionEngine.Yolo)
-            {
-                // Copy and hand over: the capture buffer is reused, and inference must not block the capture thread.
-                _worker.Submit(frame);
-                return;
-            }
-
-            var analysis = _analyzer.Analyze(frame, settings, PreviewRequested);
-            var decision = _detector.Process(analysis.Features);
-            var state = _detector.State;
-
-            lock (_gate)
-            {
-                if (_status is DetectionStatus.Running or DetectionStatus.Candidate)
-                {
-                    SetStatusLocked(state == DetectorState.Candidate ? DetectionStatus.Candidate : DetectionStatus.Running);
-                }
-            }
-
-            FrameAnalyzed?.Invoke(this, new FrameAnalyzedEventArgs(analysis, _detector.LastConfidence, state));
-
-            if (decision is not null)
-            {
-                HandleDecision(decision, settings);
-            }
-        }
-        catch (Exception ex)
-        {
-            Log.Warn("Frame analysis failed", ex);
+            _worker.Submit(frame, ticket);
         }
     }
 
     /// <summary>Runs on the inference thread, one frame at a time.</summary>
-    private void ProcessYolo(CapturedFrame frame)
+    private void ProcessFrame(CapturedFrame frame, FrameTicket ticket)
     {
-        YoloChestPipeline? pipeline;
         DetectionSettings settings;
         lock (_gate)
         {
-            pipeline = _yolo;
             settings = _settings;
-            if (_source is null || settings.Engine != DetectionEngine.Yolo)
-            {
-                return;
-            }
-        }
-
-        if (pipeline is null)
-        {
-            return;
         }
 
         try
         {
-            var result = pipeline.Process(frame.Pixels, frame.Width, frame.Height, frame.Stride, frame.Timestamp);
+            var outcome = _controller.Process(ticket, frame.Pixels, frame.Width, frame.Height, frame.Stride, frame.Timestamp,
+                (decision, matchId) => DetectionCounting.Apply(_engine, decision, settings.TestMode, settings.QueueUncertain,
+                    trackedIdentity: true, expectedMatchId: matchId));
+            if (outcome is null)
+            {
+                return; // counting stopped while this frame was in flight
+            }
+
+            var result = outcome.Frame;
             LastInferenceMs = result.ElapsedMs;
 
             // "Candidate": a chest confirmed closed is now seen open, one more open frame will count it.
@@ -449,15 +382,15 @@ public sealed class DetectionService : IDisposable
             var analysis = new FrameAnalysis(new FrameFeatures(frame.Timestamp, 0, 0, 0, null), preview, result.ElapsedMs, frame.Width, frame.Height);
             FrameAnalyzed?.Invoke(this, new FrameAnalyzedEventArgs(analysis, best, state, result));
 
-            foreach (var ev in result.Update.Events)
+            foreach (var (ev, applied) in outcome.Openings)
             {
-                Log.Info($"YOLO opening {ev.Outcome} conf={ev.Confidence:0.00} box={ev.Box} {ev.Evidence} ({result.ElapsedMs:0} ms/frame)");
-                HandleDecision(ev.ToDecision(), settings, ev.Evidence.ToString(), trackedIdentity: true);
+                Log.Info($"YOLO opening {ev.Outcome} conf={ev.Confidence:0.00} box={ev.Box} {ev.Evidence} ({result.ElapsedMs:0} ms/frame) -> {applied}");
+                Report(ev.ToDecision(), applied, ev.Evidence.ToString());
             }
         }
         catch (Exception ex)
         {
-            Log.Warn("YOLO frame analysis failed", ex);
+            Log.Warn("Frame analysis failed", ex);
         }
     }
 
@@ -521,11 +454,9 @@ public sealed class DetectionService : IDisposable
         return new PreviewImage(bytes, small.Width, small.Height);
     }
 
-    private void HandleDecision(DetectionDecision decision, DetectionSettings settings, string? detail = null, bool trackedIdentity = false)
+    private void Report(DetectionDecision decision, string result, string? detail)
     {
-        var result = DetectionCounting.Apply(_engine, decision, settings.TestMode, settings.QueueUncertain, trackedIdentity);
-
-        if (decision.Outcome == DetectionOutcome.Confirmed)
+        if (result == "counted")
         {
             lock (_gate)
             {
@@ -534,7 +465,6 @@ public sealed class DetectionService : IDisposable
             }
         }
 
-        Log.Info($"Detection {decision.Outcome} conf={decision.Confidence:0.00} frames={decision.Frames} -> {result}");
         Decision?.Invoke(this, new DetectionLogEntry(decision.Timestamp, decision.Outcome, decision.Confidence, result, detail));
     }
 
@@ -579,19 +509,10 @@ public sealed class DetectionService : IDisposable
         ThreadPool.QueueUserWorkItem(_ => StatusChanged?.Invoke(this, EventArgs.Empty));
     }
 
-    private static DetectionTuning Tuning(DetectionSettings s) =>
-        DetectionTuning.FromSensitivity(s.Sensitivity, s.CooldownSeconds, s.SamplingFps);
-
     private static DetectionSettings Clone(DetectionSettings s) => new()
     {
-        Sensitivity = s.Sensitivity, CooldownSeconds = s.CooldownSeconds, SamplingFps = s.SamplingFps,
-        Backend = s.Backend, Target = s.Target, ProcessName = s.ProcessName, TestMode = s.TestMode,
-        QueueUncertain = s.QueueUncertain, RoiWidth = s.RoiWidth, RoiHeight = s.RoiHeight, RoiCenterY = s.RoiCenterY,
-        GoldHueMin = s.GoldHueMin, GoldHueMax = s.GoldHueMax, GoldSaturationMin = s.GoldSaturationMin,
-        GoldValueMin = s.GoldValueMin, UseTemplate = s.UseTemplate, PromptX = s.PromptX, PromptY = s.PromptY,
-        PromptWidth = s.PromptWidth, PromptHeight = s.PromptHeight,
-        Engine = s.Engine, YoloModelPath = s.YoloModelPath, YoloConfidence = s.YoloConfidence, DebugView = s.DebugView,
-        DiagnosticLog = s.DiagnosticLog,
+        Sensitivity = s.Sensitivity, Backend = s.Backend, Target = s.Target, ProcessName = s.ProcessName, TestMode = s.TestMode,
+        QueueUncertain = s.QueueUncertain, YoloConfidence = s.YoloConfidence, DebugView = s.DebugView, DiagnosticLog = s.DiagnosticLog,
     };
 
     public void Dispose()
@@ -600,11 +521,11 @@ public sealed class DetectionService : IDisposable
         _watchdog.Dispose();
         StopCapture();
         _worker.Dispose();
-        _analyzer.Dispose();
+        _controller.Dispose();
         lock (_gate)
         {
-            _yolo?.Dispose();
-            _yolo = null;
+            _controller.Pipeline?.Dispose();
+            _controller.Pipeline = null;
         }
     }
 }
@@ -616,16 +537,17 @@ public sealed class DetectionService : IDisposable
 /// </summary>
 internal sealed class InferenceWorker : IDisposable
 {
-    private readonly Action<CapturedFrame> _process;
+    private readonly Action<CapturedFrame, FrameTicket> _process;
     private readonly Thread _thread;
     private readonly AutoResetEvent _signal = new(false);
     private readonly object _gate = new();
     private byte[] _pendingBuffer = [];
     private byte[] _workBuffer = [];
     private CapturedFrame? _pending;
+    private FrameTicket _pendingTicket;
     private volatile bool _stopped;
 
-    public InferenceWorker(Action<CapturedFrame> process)
+    public InferenceWorker(Action<CapturedFrame, FrameTicket> process)
     {
         _process = process;
         _thread = new Thread(Run) { IsBackground = true, Name = "YOLO inference", Priority = ThreadPriority.BelowNormal };
@@ -635,7 +557,7 @@ internal sealed class InferenceWorker : IDisposable
     /// <summary>Frames replaced before they were processed (diagnostics).</summary>
     public long Dropped { get; private set; }
 
-    public void Submit(CapturedFrame frame)
+    public void Submit(CapturedFrame frame, FrameTicket ticket)
     {
         if (_stopped)
         {
@@ -660,6 +582,7 @@ internal sealed class InferenceWorker : IDisposable
             {
                 Pixels = _pendingBuffer, Width = frame.Width, Height = frame.Height, Stride = frame.Stride, Timestamp = frame.Timestamp,
             };
+            _pendingTicket = ticket;
         }
 
         _signal.Set();
@@ -679,9 +602,11 @@ internal sealed class InferenceWorker : IDisposable
         {
             _signal.WaitOne();
             CapturedFrame? frame;
+            FrameTicket ticket;
             lock (_gate)
             {
                 frame = _pending;
+                ticket = _pendingTicket;
                 _pending = null;
                 if (frame is not null)
                 {
@@ -697,7 +622,7 @@ internal sealed class InferenceWorker : IDisposable
 
             try
             {
-                _process(frame);
+                _process(frame, ticket);
             }
             catch (Exception ex)
             {

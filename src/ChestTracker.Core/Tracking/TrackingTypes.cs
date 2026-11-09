@@ -16,9 +16,6 @@ public sealed record TrackingOptions
     /// </summary>
     public TimeSpan HybridMergeWindow { get; init; } = TimeSpan.FromSeconds(2.5);
 
-    /// <summary>Start a match automatically when a chest is counted without one.</summary>
-    public bool AutoStartMatch { get; init; } = true;
-
     /// <summary>After a crash, an unfinished match active this recently is resumed instead of closed.</summary>
     public TimeSpan ResumeWindow { get; init; } = TimeSpan.FromMinutes(10);
 

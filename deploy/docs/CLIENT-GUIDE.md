@@ -11,7 +11,7 @@
 |---|---|
 | F8 | Chest +1 |
 | F7 | Remove the last chest |
-| F9 | Start match |
+| F9 | Start match / end match (toggle) |
 | F10 | End match |
 | F6 | Show/hide the overlay |
 
@@ -28,7 +28,7 @@ and **total matches**.
    - **Log in / Sign up:** username and password, usable from any PC. A guest can later be turned into an account
      without losing statistics.
 4. Open the **Party** page. Create a party and share the `XXXX-XXXX` code, or join with a friend's code.
-5. Shared matches start and end with the owner's F9/F10.
+5. Shared matches start with the owner's F9. Pressing F9 again ends only your own counting; the shared match ends when the last player stops (or the owner ends it on the Party page).
 
 **Server page:**
 - Status and ping.
@@ -56,7 +56,7 @@ and **total matches**.
 |---|---|
 | F8 | Сундук +1 |
 | F7 | Убрать последний сундук |
-| F9 | Начать матч |
+| F9 | Начать / завершить матч |
 | F10 | Завершить матч |
 | F6 | Показать/скрыть оверлей |
 
@@ -73,7 +73,7 @@ and **total matches**.
    - **«Вход» / «Регистрация»:** логин и пароль, вход с любого компьютера. Гостя позже можно превратить в аккаунт
      без потери статистики.
 4. На странице **«Пати»** создайте пати и отправьте друзьям код `XXXX-XXXX` или войдите по чужому коду.
-5. Общий матч начинается и заканчивается клавишами F9/F10 владельца.
+5. Общий матч начинается по F9 владельца. Повторное F9 завершает только ваш подсчёт; общий матч заканчивается, когда остановится последний игрок (или владелец завершит его на вкладке «Пати»).
 
 **Страница «Сервер»:**
 - Статус и пинг.

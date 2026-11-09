@@ -56,7 +56,7 @@
     <s:String x:Key="Dash.EditCount">Изменить вручную</s:String>
     <s:String x:Key="Dash.PendingReviews">Требуют проверки</s:String>
     <s:String x:Key="Dash.PendingHint">Детектор не уверен в этих событиях. Подтвердите или отклоните их.</s:String>
-    <s:String x:Key="Dash.HotkeyHintFormat">{0} — сундук +1   ·   {1} — убрать   ·   {2} — начать матч   ·   {3} — завершить</s:String>
+    <s:String x:Key="Dash.HotkeyHintFormat">{0} — сундук +1   ·   {1} — убрать   ·   {2} — начать / завершить матч   ·   {3} — завершить</s:String>
     <s:String x:Key="Dash.Overlay">Оверлей</s:String>
     <s:String x:Key="Dash.MoveOverlay">Переместить</s:String>
     <s:String x:Key="Dash.Mode">Режим</s:String>
@@ -153,7 +153,7 @@
 
     <!-- Detection -->
     <s:String x:Key="Det.Title">Автообнаружение сундуков</s:String>
-    <s:String x:Key="Det.Warning">Экспериментальная функция. Программа анализирует только изображение на экране (Windows Graphics Capture) с низкой частотой и ищет золотую вспышку открывающегося сундука рядом с прицелом. Память игры не читается, DLL не внедряются, Easy Anti-Cheat не затрагивается. Точность не гарантируется: возможны пропуски и ложные срабатывания (например, золотые предметы или эффекты). Неуверенные случаи отправляются на проверку.</s:String>
+    <s:String x:Key="Det.Warning">Программа анализирует только изображение на экране (Windows Graphics Capture) встроенной моделью сундуков и только пока идёт матч. Память игры не читается, DLL не внедряются, Easy Anti-Cheat не затрагивается. Точность не гарантируется: сундуки могут быть пропущены, возможны ложные срабатывания. Сомнительные случаи ставятся в очередь на проверку.</s:String>
     <s:String x:Key="Det.ModeHint">Анализ работает только в автоматическом или гибридном режиме.</s:String>
     <s:String x:Key="Det.Status.Disabled">Выключено</s:String>
     <s:String x:Key="Det.Status.Unsupported">Захват экрана не поддерживается</s:String>
@@ -161,6 +161,7 @@
     <s:String x:Key="Det.Status.Running">Анализ экрана</s:String>
     <s:String x:Key="Det.Status.Candidate">Возможный сундук…</s:String>
     <s:String x:Key="Det.Status.Detected">Сундук обнаружен</s:String>
+    <s:String x:Key="Det.Status.Paused">Пауза — начните матч, чтобы считать</s:String>
     <s:String x:Key="Det.Status.Error">Ошибка захвата</s:String>
     <s:String x:Key="Det.Backend">Способ захвата</s:String>
     <s:String x:Key="Backend.WindowsGraphicsCapture">Windows Graphics Capture</s:String>
@@ -205,6 +206,7 @@
     <s:String x:Key="Det.Outcome.Uncertain">на проверку</s:String>
     <s:String x:Key="Det.Outcome.Discarded">отброшен</s:String>
     <s:String x:Key="Det.Outcome.Test">тест, не засчитан</s:String>
+    <s:String x:Key="Det.Outcome.Stale">матч уже завершён, не засчитан</s:String>
     <s:String x:Key="Det.Outcome.Suppressed">дубликат, не засчитан</s:String>
 
     <!-- Settings -->
@@ -230,7 +232,7 @@
     <s:String x:Key="Set.ResetHotkeys">По умолчанию</s:String>
     <s:String x:Key="Hotkey.AddChest">Добавить сундук</s:String>
     <s:String x:Key="Hotkey.RemoveLastChest">Убрать последний сундук</s:String>
-    <s:String x:Key="Hotkey.StartMatch">Начать новый матч</s:String>
+    <s:String x:Key="Hotkey.StartMatch">Начать / завершить матч</s:String>
     <s:String x:Key="Hotkey.EndMatch">Завершить матч</s:String>
     <s:String x:Key="Hotkey.ToggleOverlay">Показать/скрыть оверлей</s:String>
     <s:String x:Key="Hotkey.ToggleOverlayEditMode">Режим перемещения оверлея</s:String>
@@ -325,6 +327,7 @@
     <s:String x:Key="Party.Hidden">скрыто</s:String>
     <s:String x:Key="Party.InMatch">в общем матче</s:String>
     <s:String x:Key="Party.Invited">приглашён в матч</s:String>
+    <s:String x:Key="Party.Finished">закончил подсчёт</s:String>
     <s:String x:Key="Party.Declined">отказался от матча</s:String>
     <s:String x:Key="Party.Col.Match">Матч</s:String>
     <s:String x:Key="Party.Col.Lifetime">В пати</s:String>
@@ -342,12 +345,12 @@
     <s:String x:Key="Party.SharedMatch">Общий матч</s:String>
     <s:String x:Key="Party.NoSharedMatch">Сейчас общего матча нет</s:String>
     <s:String x:Key="Party.MatchRunning">Идёт общий матч · {0}</s:String>
-    <s:String x:Key="Party.SharedHint">Владелец начинает и завершает общий матч (или своими F9/F10). Участники, согласившиеся играть, начинают и заканчивают матч синхронно.</s:String>
+    <s:String x:Key="Party.SharedHint">Владелец начинает общий матч (F9 или кнопкой), согласные участники присоединяются. Повторное F9 завершает только ваш подсчёт; матч заканчивается, когда остановится последний игрок или владелец нажмёт «Завершить».</s:String>
     <s:String x:Key="Party.StartShared">Начать общий матч</s:String>
     <s:String x:Key="Party.EndShared">Завершить</s:String>
     <s:String x:Key="Party.Accept">Присоединиться</s:String>
     <s:String x:Key="Party.Decline">Отказаться</s:String>
-    <s:String x:Key="Party.AutoShare">Мои F9/F10 управляют общим матчем (владелец)</s:String>
+    <s:String x:Key="Party.AutoShare">Моя клавиша матча начинает общий матч (владелец)</s:String>
     <s:String x:Key="Party.AutoJoin">Автоматически присоединяться к общим матчам</s:String>
     <s:String x:Key="Party.Privacy">Приватность</s:String>
     <s:String x:Key="Party.ShareCounts">Показывать мою статистику в пати и таблице лидеров</s:String>
@@ -498,8 +501,8 @@
     <s:String x:Key="Det.Engine">Движок распознавания</s:String>
     <s:String x:Key="Det.Engine.Heuristic">Эвристика (золотая вспышка)</s:String>
     <s:String x:Key="Det.Engine.Yolo">Модель YOLOv8 (рекомендуется)</s:String>
-    <s:String x:Key="Det.YoloHint">Встроенная модель YOLOv8 работает локально (на видеокарте, если возможно, иначе на процессоре). Сундук засчитывается один раз и только если тот же сундук был виден закрытым, а затем открытым в нескольких кадрах подряд. Уже открытые и просто исчезнувшие сундуки не засчитываются. Оставьте путь пустым, чтобы использовать встроенную модель.</s:String>
-    <s:String x:Key="Det.ModelPath">Файл модели (.onnx)</s:String>
+    <s:String x:Key="Det.YoloHint">Встроенная модель YOLOv8 работает локально (на видеокарте, если возможно, иначе на процессоре). Сундук засчитывается один раз и только если тот же сундук был виден закрытым, а затем открытым в нескольких кадрах подряд. Уже открытые и просто исчезнувшие сундуки не засчитываются. Подсчёт работает, только пока идёт матч.</s:String>
+    <s:String x:Key="Det.Model">Модель сундуков (встроенная)</s:String>
     <s:String x:Key="Det.ModelNotLoaded">Модель ещё не загружена</s:String>
     <s:String x:Key="Det.YoloConfidence">Минимальная уверенность детекции</s:String>
     <s:String x:Key="Det.DebugView">Режим отладки: рамки и состояния сундуков в превью</s:String>

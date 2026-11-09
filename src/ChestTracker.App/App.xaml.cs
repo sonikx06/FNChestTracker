@@ -111,7 +111,7 @@ public partial class App : Application
 
         var hotkeys = new HotkeyService();
         hotkeys.Initialize();
-        var detection = new DetectionService(engine, settings.Detection, settings.TrackingMode, paths.TemplateFile);
+        var detection = new DetectionService(engine, settings.Detection, settings.TrackingMode);
         var sounds = new SoundService { Enabled = settings.General.SoundsEnabled, Volume = settings.General.SoundVolume };
         var accounts = new DpapiAccountStore(settings, store);
         var sync = new SyncClient(engine, new SyncOutbox(db), accounts, () => new SyncPreferences

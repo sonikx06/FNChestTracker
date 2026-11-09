@@ -11,26 +11,17 @@ public class CounterTests : IDisposable
     public void Dispose() => _db.Dispose();
 
     [Fact]
-    public void Adding_chest_without_match_auto_starts_one()
+    public void Adding_a_chest_without_a_running_match_is_refused_and_starts_nothing()
     {
-        var engine = _db.CreateEngine(_clock);
+        var engine = _db.CreateEngine(_clock, mode: Core.Models.TrackingMode.Hybrid);
 
-        var result = engine.AddChestManual(fromHotkey: true);
+        Assert.Equal(TrackingResultCode.NoActiveMatch, engine.AddChestManual(fromHotkey: true).Code);
+        Assert.Equal(TrackingResultCode.NoActiveMatch, engine.AddChestManual(fromHotkey: false).Code);
+        Assert.Equal(TrackingResultCode.NoActiveMatch, engine.AddChestAutomatic(0.9).Code);
 
-        Assert.True(result.Applied);
-        Assert.NotNull(engine.CurrentMatch);
-        Assert.Equal(1, engine.GetSnapshot().MatchCount);
-    }
-
-    [Fact]
-    public void Adding_chest_without_match_fails_when_auto_start_disabled()
-    {
-        var engine = _db.CreateEngine(_clock, new TrackingOptions { AutoStartMatch = false });
-
-        var result = engine.AddChestManual(fromHotkey: true);
-
-        Assert.Equal(TrackingResultCode.NoActiveMatch, result.Code);
+        Assert.Null(engine.CurrentMatch);
         Assert.Equal(0, engine.GetSnapshot().LifetimeCount);
+        Assert.Equal(0, engine.GetSnapshot().MatchesPlayed);
     }
 
     [Fact]
@@ -238,6 +229,7 @@ public class CounterTests : IDisposable
     public void Changed_event_carries_fresh_snapshot()
     {
         var engine = _db.CreateEngine(_clock);
+        engine.StartMatch();
         TrackingChangedEventArgs? last = null;
         engine.Changed += (_, e) => last = e;
 

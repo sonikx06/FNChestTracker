@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using ChestTracker.Core.Tracking;
 using ChestTracker.Protocol;
 using ChestTracker.Sync;
 
@@ -72,7 +73,7 @@ public class EndToEndSyncTests(ServerFixture fx)
     }
 
     [SkippableFact]
-    public async Task Owner_match_start_and_end_are_mirrored_and_activity_is_pushed()
+    public async Task Owner_match_start_is_mirrored_and_each_player_stops_only_their_own_counting()
     {
         Skip.IfNot(fx.Available, fx.SkipReason);
         var (a, b) = await PartyOfTwoAsync();
@@ -92,13 +93,23 @@ public class EndToEndSyncTests(ServerFixture fx)
         await Wait.UntilAsync(() => activity.Any(x => x.Kind == EventKind.Add), "Boris sees Anna's chest live");
         await Wait.UntilAsync(() => a.Client.Party?.TeamMatch.Verified == 3, "team match total");
 
-        a.Engine.EndMatch();     // owner presses F10
-        await Wait.UntilAsync(() => b.Engine.CurrentMatch is null, "Boris's local match ends with the shared one");
+        a.Engine.EndMatch();     // owner dies and presses the match hotkey: only Anna stops counting
+        await Wait.UntilAsync(() => a.Engine.CurrentMatch is null, "Anna stopped");
+        await Task.Delay(500);
+        Assert.NotNull(b.Engine.CurrentMatch);                        // Boris keeps playing in the shared match
+        Assert.Equal(shared.Id, b.Client.Party!.ActiveMatch?.Id);
+        Assert.Equal(TrackingResultCode.NoActiveMatch, a.Engine.AddChestManual(fromHotkey: true).Code); // Anna's adds are ignored
+
+        b.OpenChest();                                                // Boris counts on; Anna still receives the totals
+        await Wait.UntilAsync(() => a.Client.Party?.TeamMatch.Verified == 4, "Anna sees Boris's later chest");
+
+        b.Engine.EndMatch();     // the last player stops: the shared match ends
+        await Wait.UntilAsync(() => a.Client.Party?.ActiveMatch is null && b.Client.Party?.ActiveMatch is null, "shared match over");
 
         var history = await a.Client.GetHistoryAsync();
         var h = history.Single(x => x.Id == shared.Id);
         Assert.NotNull(h.EndedAt);
-        Assert.Equal(3, h.Team.Verified);
+        Assert.Equal(4, h.Team.Verified);
         Assert.Equal(2, h.Participants.Count);
     }
 
@@ -111,6 +122,7 @@ public class EndToEndSyncTests(ServerFixture fx)
         await using var _b = b;
         var boris = b.Client.Account!.PlayerId;
 
+        b.Engine.StartMatch();
         b.Engine.AddChestManual(fromHotkey: false);
         await Wait.UntilAsync(() => Member(a.Client, boris).Lifetime?.Reported == 1, "Boris's chest synced");
 

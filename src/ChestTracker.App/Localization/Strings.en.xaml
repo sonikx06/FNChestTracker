@@ -56,7 +56,7 @@
     <s:String x:Key="Dash.EditCount">Edit manually</s:String>
     <s:String x:Key="Dash.PendingReviews">Needs review</s:String>
     <s:String x:Key="Dash.PendingHint">The detector was not sure about these events. Count or reject them.</s:String>
-    <s:String x:Key="Dash.HotkeyHintFormat">{0} — chest +1   ·   {1} — remove   ·   {2} — start match   ·   {3} — end match</s:String>
+    <s:String x:Key="Dash.HotkeyHintFormat">{0} — chest +1   ·   {1} — remove   ·   {2} — start / end match   ·   {3} — end match</s:String>
     <s:String x:Key="Dash.Overlay">Overlay</s:String>
     <s:String x:Key="Dash.MoveOverlay">Move</s:String>
     <s:String x:Key="Dash.Mode">Mode</s:String>
@@ -153,7 +153,7 @@
 
     <!-- Detection -->
     <s:String x:Key="Det.Title">Automatic chest detection</s:String>
-    <s:String x:Key="Det.Warning">Experimental feature. The app only analyses the picture on screen (Windows Graphics Capture) at a low rate and looks for the golden burst of an opening chest near the crosshair. Game memory is never read, no DLLs are injected and Easy Anti-Cheat is not touched. Accuracy is not guaranteed: chests can be missed and false positives can happen (for example golden items or effects). Uncertain cases are queued for review.</s:String>
+    <s:String x:Key="Det.Warning">The app only analyses the picture on screen (Windows Graphics Capture) with the built-in chest model, and only while a match is running. Game memory is never read, no DLLs are injected and Easy Anti-Cheat is not touched. Accuracy is not guaranteed: chests can be missed and false positives can happen. Uncertain cases are queued for review.</s:String>
     <s:String x:Key="Det.ModeHint">Analysis only runs in automatic or hybrid mode.</s:String>
     <s:String x:Key="Det.Status.Disabled">Off</s:String>
     <s:String x:Key="Det.Status.Unsupported">Screen capture not supported</s:String>
@@ -162,6 +162,7 @@
     <s:String x:Key="Det.Status.Candidate">Possible chest…</s:String>
     <s:String x:Key="Det.Status.Detected">Chest detected</s:String>
     <s:String x:Key="Det.Status.Error">Capture error</s:String>
+    <s:String x:Key="Det.Status.Paused">Paused — start a match to count</s:String>
     <s:String x:Key="Det.Backend">Capture method</s:String>
     <s:String x:Key="Backend.WindowsGraphicsCapture">Windows Graphics Capture</s:String>
     <s:String x:Key="Backend.GdiScreen">GDI screen copy (fallback)</s:String>
@@ -205,6 +206,7 @@
     <s:String x:Key="Det.Outcome.Uncertain">queued for review</s:String>
     <s:String x:Key="Det.Outcome.Discarded">discarded</s:String>
     <s:String x:Key="Det.Outcome.Test">test, not counted</s:String>
+    <s:String x:Key="Det.Outcome.Stale">match already ended, not counted</s:String>
     <s:String x:Key="Det.Outcome.Suppressed">duplicate, not counted</s:String>
 
     <!-- Settings -->
@@ -230,7 +232,7 @@
     <s:String x:Key="Set.ResetHotkeys">Defaults</s:String>
     <s:String x:Key="Hotkey.AddChest">Add chest</s:String>
     <s:String x:Key="Hotkey.RemoveLastChest">Remove last chest</s:String>
-    <s:String x:Key="Hotkey.StartMatch">Start new match</s:String>
+    <s:String x:Key="Hotkey.StartMatch">Start / end match</s:String>
     <s:String x:Key="Hotkey.EndMatch">End match</s:String>
     <s:String x:Key="Hotkey.ToggleOverlay">Show/hide overlay</s:String>
     <s:String x:Key="Hotkey.ToggleOverlayEditMode">Overlay move mode</s:String>
@@ -325,6 +327,7 @@
     <s:String x:Key="Party.Hidden">hidden</s:String>
     <s:String x:Key="Party.InMatch">in shared match</s:String>
     <s:String x:Key="Party.Invited">invited to match</s:String>
+    <s:String x:Key="Party.Finished">stopped counting</s:String>
     <s:String x:Key="Party.Declined">declined the match</s:String>
     <s:String x:Key="Party.Col.Match">Match</s:String>
     <s:String x:Key="Party.Col.Lifetime">In party</s:String>
@@ -342,12 +345,12 @@
     <s:String x:Key="Party.SharedMatch">Shared match</s:String>
     <s:String x:Key="Party.NoSharedMatch">No shared match right now</s:String>
     <s:String x:Key="Party.MatchRunning">Shared match running · {0}</s:String>
-    <s:String x:Key="Party.SharedHint">The owner starts and ends the shared match (also with their F9/F10). Members who agree to play start and end it in sync.</s:String>
+    <s:String x:Key="Party.SharedHint">The owner starts the shared match (F9 or the button); members who agree to play join it. F9 again ends only your own counting; the match ends when its last player stops, or when the owner presses End.</s:String>
     <s:String x:Key="Party.StartShared">Start shared match</s:String>
     <s:String x:Key="Party.EndShared">End</s:String>
     <s:String x:Key="Party.Accept">Join</s:String>
     <s:String x:Key="Party.Decline">Decline</s:String>
-    <s:String x:Key="Party.AutoShare">My F9/F10 control the shared match (owner)</s:String>
+    <s:String x:Key="Party.AutoShare">My match hotkey starts a shared match (owner)</s:String>
     <s:String x:Key="Party.AutoJoin">Join shared matches automatically</s:String>
     <s:String x:Key="Party.Privacy">Privacy</s:String>
     <s:String x:Key="Party.ShareCounts">Show my statistics in the party and leaderboard</s:String>
@@ -498,8 +501,8 @@
     <s:String x:Key="Det.Engine">Detection engine</s:String>
     <s:String x:Key="Det.Engine.Heuristic">Heuristic (gold burst)</s:String>
     <s:String x:Key="Det.Engine.Yolo">YOLOv8 model (recommended)</s:String>
-    <s:String x:Key="Det.YoloHint">Runs the included YOLOv8 chest model locally (GPU when available, otherwise CPU). A chest counts once, only after the same chest was seen closed and then open in consecutive frames. Chests that are already open, or that just disappear, never count. Leave the path empty to use the included model.</s:String>
-    <s:String x:Key="Det.ModelPath">Model file (.onnx)</s:String>
+    <s:String x:Key="Det.YoloHint">Runs the included YOLOv8 chest model locally (GPU when available, otherwise CPU). A chest counts once, only after the same chest was seen closed and then open in consecutive frames. Chests that are already open, or that just disappear, never count. Counting runs only while a match is running.</s:String>
+    <s:String x:Key="Det.Model">Chest model (built in)</s:String>
     <s:String x:Key="Det.ModelNotLoaded">Model not loaded yet</s:String>
     <s:String x:Key="Det.YoloConfidence">Minimum detection confidence</s:String>
     <s:String x:Key="Det.DebugView">Debug view: draw boxes and chest states in the preview</s:String>

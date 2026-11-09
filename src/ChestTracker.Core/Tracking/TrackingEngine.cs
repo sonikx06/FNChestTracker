@@ -236,9 +236,15 @@ public sealed class TrackingEngine
     /// True for the YOLO tracker, which emits at most one opening per tracked chest: the global automatic cooldown
     /// (meant for the heuristic detector seeing one animation twice) is skipped, the manual/automatic merge is kept.
     /// </param>
-    public TrackingResult AddChestAutomatic(double confidence, DateTimeOffset? detectedAt = null, bool trackedIdentity = false) =>
+    /// <param name="expectedMatchId">
+    /// The local match the detection belongs to. If that match is no longer the current one (it was ended, or a new
+    /// one started while the frame was being analysed), nothing is stored: a stale detection never lands in the wrong
+    /// match. Checked under the engine lock, so it is atomic with Start/End Match.
+    /// </param>
+    public TrackingResult AddChestAutomatic(double confidence, DateTimeOffset? detectedAt = null, bool trackedIdentity = false,
+        Guid? expectedMatchId = null) =>
         AddChest(EventSource.Automatic, Math.Clamp(confidence, 0, 1), detectedAt, fromHotkey: false, bypassDedup: false, matchId: null,
-            trackedIdentity);
+            trackedIdentity, expectedMatchId);
 
     /// <summary>Removes the last chest of the current match by appending an undo event.</summary>
     public TrackingResult RemoveLastChest(bool fromHotkey)
@@ -390,12 +396,21 @@ public sealed class TrackingEngine
         return deleted;
     }
 
-    public DetectionReview AddPendingReview(double confidence, DateTimeOffset? at = null)
+    /// <returns>
+    /// The queued review, or null when no match is running (counting stopped) or <paramref name="expectedMatchId"/>
+    /// is no longer the current match.
+    /// </returns>
+    public DetectionReview? AddPendingReview(double confidence, DateTimeOffset? at = null, Guid? expectedMatchId = null)
     {
         DetectionReview review;
         lock (_sync)
         {
             EnsureInitialized();
+            if (_currentMatch is null || (expectedMatchId is { } expected && _currentMatch.Id != expected))
+            {
+                return null;
+            }
+
             review = new DetectionReview
             {
                 MatchId = _currentMatch?.Id,
@@ -414,7 +429,6 @@ public sealed class TrackingEngine
     public TrackingResult ResolveReview(Guid reviewId, bool accept)
     {
         TrackingResult result;
-        bool startedMatch = false;
         lock (_sync)
         {
             EnsureInitialized();
@@ -432,16 +446,11 @@ public sealed class TrackingEngine
             }
             else
             {
+                // The review belongs to the match it was detected in (also after that match ended).
                 var matchId = review.MatchId is { } mid && _repo.GetMatch(mid) is not null ? mid : _currentMatch?.Id;
                 if (matchId is null)
                 {
-                    if (!_options.AutoStartMatch)
-                    {
-                        return new TrackingResult(TrackingResultCode.NoActiveMatch);
-                    }
-
-                    matchId = StartMatchCore(now).Id;
-                    startedMatch = true;
+                    return new TrackingResult(TrackingResultCode.NoActiveMatch);
                 }
 
                 var ev = new ChestEvent
@@ -453,11 +462,6 @@ public sealed class TrackingEngine
                 _repo.ResolveReview(reviewId, ReviewStatus.Accepted, now, ev.EventId);
                 result = new TrackingResult(TrackingResultCode.Applied, ev);
             }
-        }
-
-        if (startedMatch)
-        {
-            Raise(TrackingChangeKind.MatchStarted, null);
         }
 
         Raise(TrackingChangeKind.ReviewResolved, result.Event);
@@ -522,15 +526,28 @@ public sealed class TrackingEngine
         }
     }
 
+    /// <summary>
+    /// Counting happens only inside a running match: without one (counting stopped, e.g. after the player died and
+    /// pressed the match hotkey) an add is refused and no match is started implicitly.
+    /// </summary>
     private TrackingResult AddChest(EventSource source, double? confidence, DateTimeOffset? at, bool fromHotkey,
-        bool bypassDedup, Guid? matchId, bool trackedIdentity = false)
+        bool bypassDedup, Guid? matchId, bool trackedIdentity = false, Guid? expectedMatchId = null)
     {
         ChestEvent ev;
-        var startedMatch = false;
         lock (_sync)
         {
             EnsureInitialized();
             var now = _clock.UtcNow;
+            if (matchId is null && _currentMatch is null)
+            {
+                return new TrackingResult(TrackingResultCode.NoActiveMatch);
+            }
+
+            if (expectedMatchId is { } expected && _currentMatch?.Id != expected)
+            {
+                return new TrackingResult(TrackingResultCode.NoActiveMatch);
+            }
+
             if (!bypassDedup)
             {
                 var code = _dedup.CheckAdd(source, fromHotkey, _mode, now, _options, trackedIdentity);
@@ -538,17 +555,6 @@ public sealed class TrackingEngine
                 {
                     return new TrackingResult(code);
                 }
-            }
-
-            if (matchId is null && _currentMatch is null)
-            {
-                if (!_options.AutoStartMatch)
-                {
-                    return new TrackingResult(TrackingResultCode.NoActiveMatch);
-                }
-
-                StartMatchCore(now);
-                startedMatch = true;
             }
 
             var target = matchId ?? _currentMatch!.Id;
@@ -568,11 +574,6 @@ public sealed class TrackingEngine
             }
 
             _dedup.RecordAdd(source, fromHotkey, now);
-        }
-
-        if (startedMatch)
-        {
-            Raise(TrackingChangeKind.MatchStarted, null);
         }
 
         Raise(TrackingChangeKind.ChestAdded, ev);

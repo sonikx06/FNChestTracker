@@ -1,3 +1,4 @@
+using ChestTracker.Core.Tracking;
 using ChestTracker.Protocol;
 using ChestTracker.Sync;
 using Npgsql;
@@ -128,9 +129,10 @@ public class StatisticsAuditTests(ServerFixture fx)
         Assert.Equal(P(15), await DbTotalsAsync(partyId, sharedMatch: shared));
         Assert.Equal(P(11), await DbTotalsAsync(partyId, boris));
 
-        // Shared match ends: 4 / 11 / 15, and the result is kept in history
+        // Both players stop counting, the shared match ends: 4 / 11 / 15, and the result is kept in history
         a.Clock.Step(2);
         a.Engine.EndMatch();
+        b.Engine.EndMatch();
         await Wait.UntilAsync(() => a.Client.Party?.ActiveMatch is null && b.Client.Party?.ActiveMatch is null && b.Engine.CurrentMatch is null,
             "match ended for both");
         var history = (await a.Client.GetHistoryAsync()).Single(h => h.Id == shared);
@@ -192,14 +194,21 @@ public class StatisticsAuditTests(ServerFixture fx)
     }
 
     [SkippableFact]
-    public async Task First_chest_that_auto_starts_the_owners_match_counts_in_the_shared_match()
+    public async Task Chests_without_a_running_match_are_refused_and_the_first_chest_after_start_counts_in_the_shared_match()
     {
         Skip.IfNot(fx.Available, fx.SkipReason);
         var (a, b) = await PartyOfTwoAsync();
         await using var _a = a;
         await using var _b = b;
 
-        // No match yet: the first chest auto-starts one, which starts the shared match.
+        // Counting is stopped: a chest press neither counts nor starts a match (local or shared).
+        a.Clock.Step(3);
+        Assert.Equal(TrackingResultCode.NoActiveMatch, a.Engine.AddChestManual(fromHotkey: true).Code);
+        await Task.Delay(300);
+        Assert.Null(a.Client.Party?.ActiveMatch);
+
+        // Match hotkey, then the first chest is attributed to the shared match.
+        a.Engine.ToggleMatch();
         a.Clock.Step(3);
         Assert.True(a.Engine.AddChestManual(fromHotkey: true).Applied);
         await Wait.UntilAsync(() => a.Client.Party?.ActiveMatch is not null, "shared match started");
@@ -222,7 +231,10 @@ public class StatisticsAuditTests(ServerFixture fx)
         await TeamMatchIsAsync(a, b, P(3), "match 1");
 
         a.Clock.Step(2);
-        a.Engine.StartMatch(); // F9 during a match: ends match 1, starts match 2
+        a.Engine.EndMatch();   // both stop counting: match 1 is over
+        b.Engine.EndMatch();
+        await Wait.UntilAsync(() => a.Client.Party?.ActiveMatch is null, "match 1 ended");
+        a.Engine.StartMatch(); // owner starts match 2 for the party
         await Wait.UntilAsync(() => a.Client.Party?.ActiveMatch is { } m && m.Id != first
                                     && b.Engine.CurrentMatch is { } l && b.Outbox.GetSharedMatch(l.Id) == m.Id, "match 2 joined");
         Assert.Equal(P(0), a.Client.Party!.TeamMatch);
@@ -233,6 +245,7 @@ public class StatisticsAuditTests(ServerFixture fx)
         await TeamMatchIsAsync(a, b, P(4), "match 2");
         a.Clock.Step(2);
         a.Engine.EndMatch();
+        b.Engine.EndMatch();
         await Wait.UntilAsync(() => a.Client.Party?.ActiveMatch is null, "match 2 ended");
 
         var history = await a.Client.GetHistoryAsync();

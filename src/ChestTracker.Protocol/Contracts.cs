@@ -23,6 +23,12 @@ public static class HubMethods
     public const string StartSharedMatch = "StartSharedMatch";
     public const string RespondSharedMatch = "RespondSharedMatch";
     public const string EndSharedMatch = "EndSharedMatch";
+
+    /// <summary>
+    /// A participant stopped counting (e.g. died and pressed the match hotkey). Ends only that player's part; the
+    /// shared match ends when no accepted participant is still playing (or when the owner ends it).
+    /// </summary>
+    public const string FinishSharedMatch = "FinishSharedMatch";
     public const string GetPartyState = "GetPartyState";
     public const string Ping = "Ping";
 }
@@ -115,7 +121,8 @@ public sealed record MemberDto(
     bool ShareActivity,
     CountPair? Match,
     CountPair? Lifetime,
-    ParticipantResponse? MatchResponse);
+    ParticipantResponse? MatchResponse,
+    bool MatchFinished = false); // took part, then stopped counting (e.g. died); optional field, older clients ignore it
 
 public sealed record SharedMatchDto(Guid Id, SharedMatchStatus Status, Guid StartedBy, DateTimeOffset StartedAt, DateTimeOffset? EndedAt);
 

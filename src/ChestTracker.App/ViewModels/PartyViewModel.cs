@@ -22,7 +22,7 @@ public sealed class PartyMemberItem
         Hidden = m.Lifetime is null;
         MatchText = Hidden ? "—" : matchActive && m.Match is { } mc ? Format(mc) : "—";
         LifetimeText = Hidden ? Loc.T("Party.Hidden") : Format(m.Lifetime!);
-        ResponseText = m.MatchResponse switch
+        ResponseText = m.MatchFinished ? Loc.T("Party.Finished") : m.MatchResponse switch
         {
             ParticipantResponse.Accepted => Loc.T("Party.InMatch"),
             ParticipantResponse.Pending => Loc.T("Party.Invited"),

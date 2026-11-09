@@ -38,6 +38,11 @@ Console.WriteLine($"[{name}] joined '{party.Name}' ({party.Members.Count} member
 for (var i = 0; i < chests; i++)
 {
     await Task.Delay(TimeSpan.FromSeconds(interval));
+    if (engine.CurrentMatch is null)
+    {
+        engine.StartMatch(); // like pressing the match hotkey: chests only count inside a match
+    }
+
     engine.AddChestManual(fromHotkey: true);
     Console.WriteLine($"[{name}] chest {i + 1}/{chests} (local match count {engine.GetSnapshot().MatchCount}, pending {client.PendingCount})");
 }

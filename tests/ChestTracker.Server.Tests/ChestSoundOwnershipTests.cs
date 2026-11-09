@@ -46,6 +46,11 @@ public class ChestSoundOwnershipTests(ServerFixture fx)
         /// <summary>The model sees a closed chest, then the same chest open: the app's tracker settings, counting step and engine.</summary>
         public string OpenChestAutomatically()
         {
+            if (Device.Engine.CurrentMatch is null)
+            {
+                Device.Engine.StartMatch(); // match hotkey: counting runs only inside a match
+            }
+
             Device.Clock.Step(5);
             var labels = new ModelLabels(["closed_chest", "open_chest"]);
             var tracker = new YoloChestPipeline(new NoDetector(labels), YoloSettings.TrackingOptionsFor(new DetectionSettings())).Tracker;
@@ -59,7 +64,8 @@ public class ChestSoundOwnershipTests(ServerFixture fx)
             }
 
             var ev = Assert.Single(events);
-            return DetectionCounting.Apply(Device.Engine, ev.ToDecision() with { Timestamp = Device.Clock.UtcNow }, false, true, trackedIdentity: true);
+            return DetectionCounting.Apply(Device.Engine, ev.ToDecision() with { Timestamp = Device.Clock.UtcNow }, false, true, trackedIdentity: true,
+                expectedMatchId: Device.Engine.CurrentMatch!.Id);
         }
 
         public ValueTask DisposeAsync() => Device.DisposeAsync();

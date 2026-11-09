@@ -26,11 +26,12 @@ public sealed class DetectionLogItem(DetectionLogEntry entry)
         "review" => Loc.T("Det.Outcome.Uncertain"),
         "test" => Loc.T("Det.Outcome.Test"),
         "suppressed" => Loc.T("Det.Outcome.Suppressed"),
+        "stale" => Loc.T("Det.Outcome.Stale"),
         _ => Loc.T("Det.Outcome.Discarded"),
     };
 }
 
-/// <summary>Calibration/test page for the EXPERIMENTAL detector.</summary>
+/// <summary>Live view and settings of the built-in chest model.</summary>
 public sealed partial class DetectionViewModel : ObservableObject, IDisposable
 {
     private const int HistoryLength = 80;
@@ -43,10 +44,6 @@ public sealed partial class DetectionViewModel : ObservableObject, IDisposable
 
     [ObservableProperty] private string _statusText = "";
     [ObservableProperty] private bool _isRunning;
-    [ObservableProperty] private string _goldText = "—";
-    [ObservableProperty] private string _brightnessText = "—";
-    [ObservableProperty] private string _motionText = "—";
-    [ObservableProperty] private string _templateText = "—";
     [ObservableProperty] private string _confidenceText = "—";
     [ObservableProperty] private double _confidenceValue;
     [ObservableProperty] private string _analysisText = "—";
@@ -54,8 +51,6 @@ public sealed partial class DetectionViewModel : ObservableObject, IDisposable
     [ObservableProperty] private string _baselineText = "";
     [ObservableProperty] private ImageSource? _preview;
     [ObservableProperty] private List<ChartPoint> _confidenceHistory = [];
-    [ObservableProperty] private bool _hasTemplate;
-    [ObservableProperty] private string _templateStatus = "";
     [ObservableProperty] private string? _errorText;
     [ObservableProperty] private string? _yoloText;
     [ObservableProperty] private string? _modelText;
@@ -68,13 +63,7 @@ public sealed partial class DetectionViewModel : ObservableObject, IDisposable
         var detection = main.Services.Detection;
         detection.FrameAnalyzed += OnFrameAnalyzed;
         detection.Decision += OnDecision;
-        detection.TemplateChanged += (_, _) => _dispatcher.BeginInvoke(UpdateTemplate);
-        Loc.LanguageChanged += (_, _) =>
-        {
-            UpdateTemplate();
-            OnStatusChanged();
-        };
-        UpdateTemplate();
+        Loc.LanguageChanged += (_, _) => OnStatusChanged();
     }
 
     public SettingsViewModel Settings => _main.Settings;
@@ -103,13 +92,12 @@ public sealed partial class DetectionViewModel : ObservableObject, IDisposable
         IsRunning = d.Status is DetectionStatus.Running or DetectionStatus.Candidate or DetectionStatus.Detected;
         SourceText = d.TargetDescription ?? "";
         ErrorText = d.Status == DetectionStatus.Error ? d.LastError : null;
-        ModelText = d.UsesYolo ? d.ModelDescription ?? Loc.T("Det.ModelNotLoaded") : null;
-        ModelError = d.UsesYolo ? d.ModelError : null;
-        if (!d.UsesYolo) YoloText = null;
+        ModelText = d.ModelDescription ?? Loc.T("Det.ModelNotLoaded");
+        ModelError = d.ModelError;
         OnPropertyChanged(nameof(IsActiveMode));
         if (!IsRunning)
         {
-            GoldText = BrightnessText = MotionText = TemplateText = ConfidenceText = AnalysisText = "—";
+            ConfidenceText = AnalysisText = "—";
             ConfidenceValue = 0;
         }
     }
@@ -118,24 +106,7 @@ public sealed partial class DetectionViewModel : ObservableObject, IDisposable
     private void Restart() => _main.Services.Detection.Restart();
 
     [RelayCommand]
-    private void CaptureTemplate() => _main.Services.Detection.RequestTemplateCapture();
-
-    [RelayCommand]
-    private void ClearTemplate() => _main.Services.Detection.ClearTemplate();
-
-    [RelayCommand]
     private void ClearLog() => Log.Clear();
-
-    private void UpdateTemplate()
-    {
-        var had = HasTemplate;
-        HasTemplate = _main.Services.Detection.HasTemplate;
-        TemplateStatus = Loc.T(HasTemplate ? "Det.TemplateSet" : "Det.TemplateMissing");
-        if (HasTemplate && !had && _main.CurrentPage == this)
-        {
-            _main.ShowToast(Loc.T("Toast.TemplateSaved"), ToastKind.Success);
-        }
-    }
 
     private void OnFrameAnalyzed(object? sender, FrameAnalyzedEventArgs e)
     {
@@ -154,11 +125,6 @@ public sealed partial class DetectionViewModel : ObservableObject, IDisposable
 
     private void ApplyFrame(FrameAnalyzedEventArgs e)
     {
-        var f = e.Analysis.Features;
-        GoldText = f.GoldRatio.ToString("P1", Loc.Culture);
-        BrightnessText = f.Brightness.ToString("0", Loc.Culture);
-        MotionText = f.Motion.ToString("P1", Loc.Culture);
-        TemplateText = f.TemplateScore is { } t ? t.ToString("0.00", Loc.Culture) : "—";
         ConfidenceValue = e.Confidence;
         ConfidenceText = e.Confidence.ToString("P0", Loc.Culture);
         AnalysisText = $"{e.Analysis.ElapsedMs:0.0} ms";
@@ -178,7 +144,6 @@ public sealed partial class DetectionViewModel : ObservableObject, IDisposable
             var states = string.Join(", ", tracks.GroupBy(t => t.State).Select(g => $"{g.Key} {g.Count()}"));
             YoloText = Loc.F("Det.YoloStats", y.Detections.Count, tracks.Count, states.Length == 0 ? "—" : states,
                 y.Update.Containers.Count, y.ElapsedMs.ToString("0", CultureInfo.InvariantCulture));
-            GoldText = BrightnessText = MotionText = TemplateText = "—";
         }
 
         if (e.Analysis.Preview is { } p)

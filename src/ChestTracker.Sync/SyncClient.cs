@@ -10,6 +10,7 @@ using ChestTracker.Core.Models;
 using ChestTracker.Core.Tracking;
 using ChestTracker.Protocol;
 using Microsoft.AspNetCore.Http.Connections;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -713,6 +714,38 @@ public sealed class SyncClient : IAsyncDisposable
         await PingAsync();
         await RefreshAccountAsync();
         await FlushAsync();
+        _matchOps.Writer.TryWrite(SendFinishesAsync);
+    }
+
+    /// <summary>
+    /// Tells the server about shared matches this player stopped counting in (also stops made while offline).
+    /// Only this player's participation ends; the server ends the shared match when nobody is playing any more.
+    /// </summary>
+    private async Task SendFinishesAsync()
+    {
+        foreach (var (shared, at) in _outbox.PendingFinishes())
+        {
+            if (_hub is not { State: HubConnectionState.Connected } hub)
+            {
+                return; // sent after the next reconnect
+            }
+
+            try
+            {
+                await hub.InvokeAsync(HubMethods.FinishSharedMatch, shared, at, _cts.Token);
+                _outbox.FinishSent(shared, at);
+            }
+            catch (HubException ex) when (ex.Message.Contains(ErrorCodes.NotFound, StringComparison.Ordinal)
+                                          || ex.Message.Contains(ErrorCodes.NotMember, StringComparison.Ordinal))
+            {
+                _outbox.FinishSent(shared, at); // the shared match is already over (or we left the party): nothing to end
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                Log.Warn("Could not report the end of shared-match participation; retrying later", ex);
+                return;
+            }
+        }
     }
 
     /// <summary>Picks up name/username changes made on another computer.</summary>
@@ -921,35 +954,38 @@ public sealed class SyncClient : IAsyncDisposable
         var current = e.Snapshot.CurrentMatch?.Id;
         _lastLocalMatch = current;
 
-        if (Volatile.Read(ref _suppressEcho) == 0 && _preferences().AutoShareMatches)
+        // Stopping counting (match hotkey or button, e.g. after dying) ends only this player's participation in a
+        // linked shared match. The shared match goes on for the others; the server ends it when nobody plays any
+        // more, or the owner ends it for everyone from the Party page.
+        if (Volatile.Read(ref _suppressEcho) == 0 && e.Kind == TrackingChangeKind.MatchEnded && previous is { } ended)
         {
-            // Owner's own F9/F10 drive the shared match for the whole party.
-            if (e.Kind == TrackingChangeKind.MatchEnded && previous is { } ended)
-            {
-                _matchOps.Writer.TryWrite(async () =>
-                {
-                    if (IsOwner && Party?.ActiveMatch is { } active && _outbox.GetSharedMatch(ended) == active.Id && IsConnected)
-                    {
-                        await _hub!.InvokeAsync(HubMethods.EndSharedMatch, active.Id, _cts.Token);
-                    }
-                });
-            }
-            else if (e.Kind == TrackingChangeKind.MatchStarted && current is { } started)
-            {
-                _matchOps.Writer.TryWrite(async () =>
-                {
-                    if (IsOwner && Party is { Members.Count: > 1 } && IsConnected && _outbox.GetSharedMatch(started) is null)
-                    {
-                        if (Party.ActiveMatch is { } old)
-                        {
-                            await _hub!.InvokeAsync(HubMethods.EndSharedMatch, old.Id, _cts.Token);
-                        }
+            _outbox.MarkFinished(ended, DateTimeOffset.UtcNow);
+            _matchOps.Writer.TryWrite(SendFinishesAsync);
+        }
 
+        if (Volatile.Read(ref _suppressEcho) == 0 && _preferences().AutoShareMatches
+            && e.Kind == TrackingChangeKind.MatchStarted && current is { } started)
+        {
+            // The owner's match start starts a shared match for the party. The server never ends a shared match
+            // that others are still playing in: then this match stays local (counted, but not shared).
+            _matchOps.Writer.TryWrite(async () =>
+            {
+                if (IsOwner && Party is { Members.Count: > 1 } && IsConnected && _outbox.GetSharedMatch(started) is null)
+                {
+                    try
+                    {
                         var match = await _hub!.InvokeAsync<SharedMatchDto>(HubMethods.StartSharedMatch, _cts.Token);
-                        _outbox.LinkMatch(started, match.Id);
+                        if (_engine.CurrentMatch?.Id == started)
+                        {
+                            _outbox.LinkMatch(started, match.Id);
+                        }
                     }
-                });
-            }
+                    catch (HubException ex) when (ex.Message.Contains(ErrorCodes.MatchActive, StringComparison.Ordinal))
+                    {
+                        Log.Info("Party's shared match is still running for other players; this match is counted locally");
+                    }
+                }
+            });
         }
 
         if (e.Kind is TrackingChangeKind.ChestAdded or TrackingChangeKind.ChestRemoved or TrackingChangeKind.Corrected
@@ -996,6 +1032,8 @@ public sealed class SyncClient : IAsyncDisposable
         {
             WithoutEcho(() => _engine.EndMatch());
         }
+
+        _outbox.FinishSent(match.Id, match.EndedAt ?? DateTimeOffset.UtcNow); // the match is over: nothing left to report
 
         SharedMatchEnded?.Invoke(this, match);
         return Task.CompletedTask;

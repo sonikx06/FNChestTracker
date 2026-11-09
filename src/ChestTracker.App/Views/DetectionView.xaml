@@ -86,31 +86,7 @@
                                        Visibility="{Binding ErrorText, Converter={StaticResource NullToVis}}" />
 
                             <TextBlock Text="{DynamicResource Det.Live}" Style="{StaticResource Text.Label}" Margin="0,16,0,4" />
-                            <UniformGrid Columns="6" Margin="-4,0">
-                                <Border Style="{StaticResource Metric}">
-                                    <StackPanel>
-                                        <TextBlock Text="{DynamicResource Det.GoldRatio}" Style="{StaticResource Text.Caption}" />
-                                        <TextBlock Text="{Binding GoldText}" Style="{StaticResource MetricValue}" Foreground="{StaticResource Brush.Gold}" />
-                                    </StackPanel>
-                                </Border>
-                                <Border Style="{StaticResource Metric}">
-                                    <StackPanel>
-                                        <TextBlock Text="{DynamicResource Det.Brightness}" Style="{StaticResource Text.Caption}" />
-                                        <TextBlock Text="{Binding BrightnessText}" Style="{StaticResource MetricValue}" />
-                                    </StackPanel>
-                                </Border>
-                                <Border Style="{StaticResource Metric}">
-                                    <StackPanel>
-                                        <TextBlock Text="{DynamicResource Det.Motion}" Style="{StaticResource Text.Caption}" />
-                                        <TextBlock Text="{Binding MotionText}" Style="{StaticResource MetricValue}" />
-                                    </StackPanel>
-                                </Border>
-                                <Border Style="{StaticResource Metric}">
-                                    <StackPanel>
-                                        <TextBlock Text="{DynamicResource Det.TemplateScore}" Style="{StaticResource Text.Caption}" />
-                                        <TextBlock Text="{Binding TemplateText}" Style="{StaticResource MetricValue}" />
-                                    </StackPanel>
-                                </Border>
+                            <UniformGrid Columns="2" Margin="-4,0">
                                 <Border Style="{StaticResource Metric}">
                                     <StackPanel>
                                         <TextBlock Text="{DynamicResource Det.Confidence}" Style="{StaticResource Text.Caption}" />
@@ -190,20 +166,13 @@
                     <StackPanel DataContext="{Binding Settings}">
                         <TextBlock Text="{DynamicResource Det.Calibration}" Style="{StaticResource Text.H2}" />
 
-                        <!-- EXPERIMENTAL: detection engine -->
-                        <TextBlock Text="{DynamicResource Det.Engine}" Style="{StaticResource RowLabel}" />
-                        <ComboBox ItemsSource="{Binding Engines}" SelectedItem="{Binding SelectedEngine}" DisplayMemberPath="Label"
-                                  AutomationProperties.AutomationId="DetectionEngine" />
-                        <StackPanel Visibility="{Binding IsYolo, Converter={StaticResource BoolToVis}}">
-                            <TextBlock Text="{DynamicResource Det.YoloHint}" Style="{StaticResource Text.Caption}" TextWrapping="Wrap" Margin="0,6,0,0" />
-                            <TextBlock Text="{DynamicResource Det.ModelPath}" Style="{StaticResource RowLabel}" />
-                            <DockPanel>
-                                <Button DockPanel.Dock="Right" Content="…" Margin="6,0,0,0" Padding="10,5" Command="{Binding BrowseModelCommand}" />
-                                <TextBox Text="{Binding YoloModelPath, UpdateSourceTrigger=LostFocus}" FontFamily="Consolas" FontSize="11"
-                                         ToolTip="{Binding YoloModelPlaceholder}" />
-                            </DockPanel>
+                        <!-- Built-in chest model (fixed: models\best.onnx) -->
+                        <StackPanel>
+                            <TextBlock Text="{DynamicResource Det.Model}" Style="{StaticResource RowLabel}" />
                             <TextBlock Text="{Binding DataContext.ModelText, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                       Style="{StaticResource Text.Caption}" TextWrapping="Wrap" Margin="0,4,0,0" />
+                                       Style="{StaticResource Text.Caption}" TextWrapping="Wrap" FontFamily="Consolas" FontSize="11"
+                                       AutomationProperties.AutomationId="ModelInfo" />
+                            <TextBlock Text="{DynamicResource Det.YoloHint}" Style="{StaticResource Text.Caption}" TextWrapping="Wrap" Margin="0,6,0,0" />
                             <TextBlock Text="{Binding DataContext.ModelError, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                        Style="{StaticResource Text.Caption}" TextWrapping="Wrap" Foreground="{StaticResource Brush.Danger}"
                                        Visibility="{Binding DataContext.ModelError, RelativeSource={RelativeSource AncestorType=UserControl}, Converter={StaticResource NullToVis}}" />
@@ -228,73 +197,6 @@
                             <TextBlock Text="{DynamicResource Det.Sensitivity}" Style="{StaticResource Text.Label}" FontSize="12.5" />
                         </DockPanel>
                         <Slider Minimum="0" Maximum="100" Value="{Binding Sensitivity}" IsSnapToTickEnabled="True" TickFrequency="1" />
-
-                        <DockPanel Margin="0,8,0,0">
-                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                                <TextBlock Text="{Binding CooldownSeconds, StringFormat={}{0:0.0}}" FontWeight="SemiBold" />
-                                <TextBlock Text=" " />
-                                <TextBlock Text="{DynamicResource Common.Seconds}" Foreground="{StaticResource Brush.TextMuted}" />
-                            </StackPanel>
-                            <TextBlock Text="{DynamicResource Det.Cooldown}" Style="{StaticResource Text.Label}" FontSize="12.5" />
-                        </DockPanel>
-                        <Slider Minimum="0.5" Maximum="15" Value="{Binding CooldownSeconds}" />
-
-                        <DockPanel Margin="0,8,0,0">
-                            <TextBlock DockPanel.Dock="Right" Text="{Binding SamplingFps}" FontWeight="SemiBold" />
-                            <TextBlock Text="{DynamicResource Det.Fps}" Style="{StaticResource Text.Label}" FontSize="12.5" />
-                        </DockPanel>
-                        <Slider Minimum="1" Maximum="10" Value="{Binding SamplingFps}" IsSnapToTickEnabled="True" TickFrequency="1" />
-
-                        <TextBlock Text="{DynamicResource Det.Roi}" Style="{StaticResource Text.H2}" FontSize="14" Margin="0,18,0,0" />
-                        <DockPanel Margin="0,8,0,0">
-                            <TextBlock DockPanel.Dock="Right" Text="{Binding RoiWidth, Converter={StaticResource Percent}}" FontWeight="SemiBold" />
-                            <TextBlock Text="{DynamicResource Det.RoiWidth}" Style="{StaticResource Text.Label}" FontSize="12.5" />
-                        </DockPanel>
-                        <Slider Minimum="0.1" Maximum="1" Value="{Binding RoiWidth}" />
-                        <DockPanel Margin="0,6,0,0">
-                            <TextBlock DockPanel.Dock="Right" Text="{Binding RoiHeight, Converter={StaticResource Percent}}" FontWeight="SemiBold" />
-                            <TextBlock Text="{DynamicResource Det.RoiHeight}" Style="{StaticResource Text.Label}" FontSize="12.5" />
-                        </DockPanel>
-                        <Slider Minimum="0.1" Maximum="1" Value="{Binding RoiHeight}" />
-                        <DockPanel Margin="0,6,0,0">
-                            <TextBlock DockPanel.Dock="Right" Text="{Binding RoiCenterY, Converter={StaticResource Percent}}" FontWeight="SemiBold" />
-                            <TextBlock Text="{DynamicResource Det.RoiCenterY}" Style="{StaticResource Text.Label}" FontSize="12.5" />
-                        </DockPanel>
-                        <Slider Minimum="0.2" Maximum="0.8" Value="{Binding RoiCenterY}" />
-
-                        <TextBlock Text="{DynamicResource Det.Gold}" Style="{StaticResource Text.H2}" FontSize="14" Margin="0,18,0,0" />
-                        <DockPanel Margin="0,8,0,0">
-                            <TextBlock DockPanel.Dock="Right" Text="{Binding GoldHueMin}" FontWeight="SemiBold" />
-                            <TextBlock Text="{DynamicResource Det.HueMin}" Style="{StaticResource Text.Label}" FontSize="12.5" />
-                        </DockPanel>
-                        <Slider Minimum="0" Maximum="60" Value="{Binding GoldHueMin}" IsSnapToTickEnabled="True" TickFrequency="1" />
-                        <DockPanel Margin="0,6,0,0">
-                            <TextBlock DockPanel.Dock="Right" Text="{Binding GoldHueMax}" FontWeight="SemiBold" />
-                            <TextBlock Text="{DynamicResource Det.HueMax}" Style="{StaticResource Text.Label}" FontSize="12.5" />
-                        </DockPanel>
-                        <Slider Minimum="0" Maximum="60" Value="{Binding GoldHueMax}" IsSnapToTickEnabled="True" TickFrequency="1" />
-                        <DockPanel Margin="0,6,0,0">
-                            <TextBlock DockPanel.Dock="Right" Text="{Binding GoldSaturationMin}" FontWeight="SemiBold" />
-                            <TextBlock Text="{DynamicResource Det.SatMin}" Style="{StaticResource Text.Label}" FontSize="12.5" />
-                        </DockPanel>
-                        <Slider Minimum="0" Maximum="255" Value="{Binding GoldSaturationMin}" IsSnapToTickEnabled="True" TickFrequency="1" />
-                        <DockPanel Margin="0,6,0,0">
-                            <TextBlock DockPanel.Dock="Right" Text="{Binding GoldValueMin}" FontWeight="SemiBold" />
-                            <TextBlock Text="{DynamicResource Det.ValMin}" Style="{StaticResource Text.Label}" FontSize="12.5" />
-                        </DockPanel>
-                        <Slider Minimum="0" Maximum="255" Value="{Binding GoldValueMin}" IsSnapToTickEnabled="True" TickFrequency="1" />
-
-                        <TextBlock Text="{DynamicResource Det.Template}" Style="{StaticResource Text.H2}" FontSize="14" Margin="0,18,0,0" />
-                        <TextBlock Text="{DynamicResource Det.TemplateHint}" Style="{StaticResource Text.Caption}" Margin="0,6,0,6" />
-                        <CheckBox Content="{DynamicResource Det.UseTemplate}" IsChecked="{Binding UseTemplate}" />
-                        <TextBlock Text="{Binding DataContext.TemplateStatus, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                   Style="{StaticResource Text.Caption}" Margin="0,4,0,8" />
-                        <StackPanel Orientation="Horizontal">
-                            <Button Content="{DynamicResource Det.CaptureTemplate}" Margin="0,0,8,0"
-                                    Command="{Binding DataContext.CaptureTemplateCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" />
-                            <Button Content="{DynamicResource Det.ClearTemplate}" Style="{StaticResource Button.Ghost}"
-                                    Command="{Binding DataContext.ClearTemplateCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" />
-                        </StackPanel>
 
                         <Button Content="{DynamicResource Set.ResetHotkeys}" Style="{StaticResource Button.Ghost}" HorizontalAlignment="Left"
                                 Margin="0,18,0,0" Command="{Binding ResetDetectionDefaultsCommand}" />

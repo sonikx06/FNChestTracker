@@ -197,7 +197,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 RemoveChest(fromHotkey: true);
                 break;
             case HotkeyAction.StartMatch:
-                StartMatch();
+                // The match hotkey toggles counting: start a match, press again (e.g. after dying) to end it.
+                // Same authoritative engine state and double-press guard as the dashboard's Start/End button.
+                ToggleMatch();
                 break;
             case HotkeyAction.EndMatch:
                 EndMatch();

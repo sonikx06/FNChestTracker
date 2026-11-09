@@ -23,3 +23,23 @@ ChestTracker.zip
 tools/yolo/data/
 tools/yolo/runs/
 tools/yolo/export/
+# Release assets built by build-release.ps1
+dist/
+
+# Local data, logs, secrets and configuration (never commit)
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.ctbak
+*.log
+.env
+*.pfx
+*.pem
+signing.key
+appsettings.*.local.json
+/settings.json
+/logs/
+/backups/
+.idea/
+.vscode/

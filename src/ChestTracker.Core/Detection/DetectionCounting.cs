@@ -9,8 +9,13 @@ namespace ChestTracker.Core.Detection;
 /// </summary>
 public static class DetectionCounting
 {
-    /// <returns>"counted", "suppressed" (duplicate of a manual add, or cooldown), "review", "test" or "discarded".</returns>
-    public static string Apply(TrackingEngine engine, DetectionDecision decision, bool testMode, bool queueUncertain, bool trackedIdentity)
+    /// <param name="expectedMatchId">
+    /// The local match that was running when the frame was captured. If counting stopped (or a new match started)
+    /// in the meantime, the result is "stale" and nothing is stored.
+    /// </param>
+    /// <returns>"counted", "suppressed" (duplicate of a manual add, or cooldown), "review", "test", "stale" or "discarded".</returns>
+    public static string Apply(TrackingEngine engine, DetectionDecision decision, bool testMode, bool queueUncertain, bool trackedIdentity,
+        Guid? expectedMatchId = null)
     {
         if (decision.Outcome == DetectionOutcome.Discarded)
         {
@@ -24,14 +29,15 @@ public static class DetectionCounting
 
         if (decision.Outcome == DetectionOutcome.Confirmed)
         {
-            var r = engine.AddChestAutomatic(decision.Confidence, decision.Timestamp, trackedIdentity);
-            return r.Applied ? "counted" : "suppressed";
+            var r = engine.AddChestAutomatic(decision.Confidence, decision.Timestamp, trackedIdentity, expectedMatchId);
+            return r.Applied ? "counted"
+                : r.Code == TrackingResultCode.NoActiveMatch ? "stale"
+                : "suppressed";
         }
 
         if (queueUncertain)
         {
-            engine.AddPendingReview(decision.Confidence, decision.Timestamp);
-            return "review";
+            return engine.AddPendingReview(decision.Confidence, decision.Timestamp, expectedMatchId) is null ? "stale" : "review";
         }
 
         return "discarded";

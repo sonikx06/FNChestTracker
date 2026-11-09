@@ -105,6 +105,7 @@ public class ChestOpeningScenarioTests : IDisposable
 
         // Both reach the engine: there is no global cooldown for tracked detections.
         var engine = _db.CreateEngine(new FakeClock(T0), mode: TrackingMode.Automatic);
+        engine.StartMatch();
         foreach (var ev in events)
         {
             Assert.Equal("counted", DetectionCounting.Apply(engine, ev.ToDecision(), false, true, trackedIdentity: true));
@@ -188,8 +189,21 @@ public class ChestOpeningScenarioTests : IDisposable
     public void Low_open_probability_goes_to_review_instead_of_counting()
     {
         var m = AppTracker();
-        var ev = Assert.Single(Run(m, Repeat(3, Closed()).Concat(Repeat(2, Open(conf: 0.45f)))));
+        var ev = Assert.Single(Run(m, Repeat(3, Closed()).Concat(Repeat(6, Open(conf: 0.45f)))));
         Assert.Equal(DetectionOutcome.Uncertain, ev.Outcome);
+        Assert.Equal(4, ev.Evidence.OpenedFrames); // decided after at most 4 open frames
+    }
+
+    [Fact]
+    public void Weak_first_open_frames_wait_for_clearer_ones_and_still_count_once()
+    {
+        // Lid animation and loot burst blur the first open frames; the next ones are clear.
+        var m = AppTracker();
+        var frames = Repeat(3, Closed()).Concat([[Open(conf: 0.45f)], [Open(conf: 0.42f)], [Open(conf: 0.80f)], [Open(conf: 0.85f)]])
+            .Concat(Repeat(20, Open(conf: 0.9f)));
+        var ev = Assert.Single(Run(m, frames));
+        Assert.Equal(DetectionOutcome.Confirmed, ev.Outcome);
+        Assert.Equal(0.625, ev.Confidence, 3);    // best two of 0.45, 0.42, 0.80: decided on the third open frame
     }
 
     // ---------------------------------------------------------------- 9–12: chest events
@@ -199,6 +213,7 @@ public class ChestOpeningScenarioTests : IDisposable
     {
         var clock = new FakeClock(T0);
         var engine = _db.CreateEngine(clock, mode: TrackingMode.Hybrid);
+        engine.StartMatch();
         var decision = new DetectionDecision(DetectionOutcome.Confirmed, 0.8, T0, 2);
 
         Assert.True(engine.AddChestManual(fromHotkey: true).Applied);              // player presses the hotkey
@@ -218,13 +233,14 @@ public class ChestOpeningScenarioTests : IDisposable
     {
         var clock = new FakeClock(T0);
         var engine = _db.CreateEngine(clock, mode: TrackingMode.Automatic);
+        engine.StartMatch();
         var before = engine.GetSnapshot().LifetimeCount;
         var ev = Assert.Single(Run(AppTracker(), Repeat(3, Closed()).Concat(Repeat(2, Open()))));
 
         Assert.Equal("counted", DetectionCounting.Apply(engine, ev.ToDecision(), false, true, trackedIdentity: true));
         var snap = engine.GetSnapshot();
         Assert.Equal(before + 1, snap.LifetimeCount);
-        Assert.Equal(1, snap.MatchCount);          // the match was started automatically
+        Assert.Equal(1, snap.MatchCount);
         var stored = Assert.Single(_db.Repo.GetAllEvents(), e => e.Kind == ChestEventKind.Add);
         Assert.Equal(EventSource.Automatic, stored.Source);
         Assert.Equal(0.8, stored.Confidence!.Value, 2);
@@ -236,6 +252,7 @@ public class ChestOpeningScenarioTests : IDisposable
     {
         var clock = new FakeClock(T0);
         var engine = _db.CreateEngine(clock, new TrackingOptions { ManualDebounce = TimeSpan.Zero }, TrackingMode.Hybrid);
+        engine.StartMatch();
         var manual = engine.AddChestManual(fromHotkey: false).Event!;
         clock.AdvanceSeconds(10);
         DetectionCounting.Apply(engine, new DetectionDecision(DetectionOutcome.Confirmed, 0.9, clock.UtcNow, 2), false, true, true);
@@ -288,6 +305,7 @@ public class ChestOpeningScenarioTests : IDisposable
     {
         var clock = new FakeClock(T0);
         var engine = _db.CreateEngine(clock, mode: TrackingMode.Automatic);
+        engine.StartMatch();
         DetectionCounting.Apply(engine, new DetectionDecision(DetectionOutcome.Confirmed, 0.9, T0, 2), false, true, true);
         engine.Shutdown();
 
@@ -328,6 +346,7 @@ public class LocalSoundTests : IDisposable
         var played = new List<SoundCue>();
         LocalSoundRouter.Attach(engine, played.Add);
 
+        engine.StartMatch();
         engine.AddChestManual(fromHotkey: true);
         _clock.AdvanceSeconds(0.1);
         engine.AddChestManual(fromHotkey: true);                    // debounced double press: no event, no sound

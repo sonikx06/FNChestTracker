@@ -123,6 +123,12 @@ public sealed class SchemaMigrator(NpgsqlDataSource dataSource, ILogger<SchemaMi
                 SELECT party_id, player_id, joined_at, left_at, CASE WHEN left_at IS NULL THEN NULL ELSE 'unknown' END, true
                 FROM party_members;
             """),
+        (4, """
+            -- When a participant stopped counting in a shared match (local stop, e.g. after dying). NULL = still playing.
+            -- A participant's events count for the shared match only until then (plus the usual grace); the shared
+            -- match itself ends when every accepted participant has finished, or when the owner ends it.
+            ALTER TABLE shared_match_participants ADD COLUMN finished_at timestamptz NULL;
+            """),
     ];
 
     public async Task MigrateAsync(CancellationToken ct = default)

@@ -182,7 +182,7 @@ public sealed partial class OverlayViewModel : ObservableObject
             DetectionStatus.Running => Frozen(Color.FromRgb(0x22, 0xC5, 0x5E)),
             DetectionStatus.Candidate => Frozen(Color.FromRgb(0xF5, 0x9E, 0x0B)),
             DetectionStatus.Detected => Frozen(Color.FromRgb(0xC0, 0x84, 0xFC)),
-            DetectionStatus.WaitingForGame => Frozen(Color.FromRgb(0x71, 0x71, 0x7A)),
+            DetectionStatus.WaitingForGame or DetectionStatus.Paused => Frozen(Color.FromRgb(0x71, 0x71, 0x7A)),
             DetectionStatus.Error or DetectionStatus.Unsupported => Frozen(Color.FromRgb(0xF4, 0x3F, 0x5E)),
             _ => Frozen(Color.FromRgb(0x52, 0x52, 0x5B)),
         };

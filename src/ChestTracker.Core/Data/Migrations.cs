@@ -87,6 +87,14 @@ public static class Migrations
                 shared_match_id TEXT NOT NULL
             );
             """),
+
+        // When this player stopped counting in a linked shared match, and whether the server was told. Lets a stop
+        // made while offline reach the server later. Existing links are history: nothing to send for them.
+        new Migration(4, "Shared match participation end", """
+            ALTER TABLE shared_match_links ADD COLUMN finished_at INTEGER NULL;
+            ALTER TABLE shared_match_links ADD COLUMN finish_sent INTEGER NOT NULL DEFAULT 0;
+            UPDATE shared_match_links SET finish_sent = 1;
+            """),
     ];
 
     public static int LatestVersion => All[^1].Version;
