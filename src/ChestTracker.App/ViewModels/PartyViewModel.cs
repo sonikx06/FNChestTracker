@@ -43,9 +43,8 @@ public sealed class PartyMemberItem
     public string ResponseText { get; }
     public bool CanManage { get; }
 
-    /// <summary>"verified" or "verified (reported)" when they differ.</summary>
-    public static string Format(CountPair c) =>
-        c.Verified == c.Reported ? c.Verified.ToString(CultureInfo.InvariantCulture) : $"{c.Verified} ({c.Reported})";
+    /// <summary>"verified" or "verified (reported)" when they differ (shared with the overlay).</summary>
+    public static string Format(CountPair c) => ChestTracker.Sync.PartyStatistics.Format(c);
 }
 
 public sealed class LeaderboardItem(LeaderboardEntryDto e, bool isMe)
@@ -180,9 +179,10 @@ public sealed partial class PartyViewModel : ObservableObject
             Members.Add(new PartyMemberItem(member, member.PlayerId == me, IsOwner, party.ActiveMatch is not null));
         }
 
-        HasActiveMatch = party.ActiveMatch is not null;
-        TeamMatchText = HasActiveMatch ? PartyMemberItem.Format(party.TeamMatch) : "—";
-        TeamLifetimeText = PartyMemberItem.Format(party.TeamLifetime);
+        var stats = ChestTracker.Sync.PartyStatistics.From(party, me)!;
+        HasActiveMatch = stats.SharedMatchActive;
+        TeamMatchText = ChestTracker.Sync.PartyStatistics.Format(stats.TeamMatch);
+        TeamLifetimeText = ChestTracker.Sync.PartyStatistics.Format(stats.TeamLifetime);
         SharedMatchText = party.ActiveMatch is { } am
             ? Loc.F("Party.MatchRunning", Loc.Duration(DateTimeOffset.UtcNow - am.StartedAt))
             : Loc.T("Party.NoSharedMatch");

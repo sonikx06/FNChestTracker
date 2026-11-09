@@ -76,7 +76,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         };
 
         var sync = services.Sync;
-        sync.StateChanged += (_, _) => _dispatcher.BeginInvoke(() => Overlay.ApplyParty(sync.Party, sync.Account?.PlayerId));
+        sync.StateChanged += (_, _) => _dispatcher.BeginInvoke(() =>
+            Overlay.ApplyParty(ChestTracker.Sync.PartyStatistics.From(sync.Party, sync.Account?.PlayerId)));
+        Overlay.ApplyParty(ChestTracker.Sync.PartyStatistics.From(sync.Party, sync.Account?.PlayerId)); // state known before subscribing
         sync.Activity += (_, a) => _dispatcher.BeginInvoke(() => OnTeammateActivity(a));
         sync.SharedMatchStarted += (_, e) => _dispatcher.BeginInvoke(() =>
             ShowToast(Loc.T(e.Joined ? "Party.Toast.Joined" : "Party.Toast.Invited"), e.Joined ? ToastKind.Success : ToastKind.Warning));

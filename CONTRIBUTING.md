@@ -37,12 +37,36 @@ tools\pgsql\bin\pg_ctl.exe -D tools\pgdata stop
 powershell -ExecutionPolicy Bypass -File .\build-release.ps1        # add -SkipTests to skip the test run
 ```
 
-It runs all tests, publishes the self-contained Windows client and the Windows/Linux servers, checks that no key,
+It runs all tests, publishes the self-contained single-file Windows client (one exe plus `models/best.onnx`) and the Windows/Linux servers, checks that no key,
 certificate, database or state file is included, and writes:
 
 - `ChestTracker-Release/` with `Client/`, `Server/Windows/`, `Server/Linux/`, `Server/reverse-proxy/`, `Documentation/`
 - `dist/FortniteChestTracker-win-x64.zip` (the player download), `dist/FortniteChestTracker-Server-win-x64.zip`,
-  `dist/FortniteChestTracker-Server-linux-x64.zip` and `dist/SHA256SUMS.txt`
+  `dist/FortniteChestTracker-Server-linux-x64.zip`, `dist/SHA256SUMS.txt` and its signature `dist/SHA256SUMS.txt.sig`
+
+## Release signing and the in-app updater
+
+The app updates itself from GitHub Releases. A release is offered only if it has these assets:
+`FortniteChestTracker-win-x64.zip` (one folder with `FortniteChestTracker.exe` and `models/best.onnx`), `SHA256SUMS.txt`
+and `SHA256SUMS.txt.sig`, a base64 ECDSA P-256 / SHA-256 signature of the checksums file. The public key is built
+into the app (`UpdateSource.PublicKeyPem` in `src/ChestTracker.Core/Updates/UpdateChecker.cs`); the package is
+installed only if the signature verifies and the ZIP's SHA-256 matches. Tags are semantic versions (`v1.3.0`,
+`v1.4.0-beta.1`); pre-releases are offered too.
+
+- The private key lives outside the repository, by default in `%USERPROFILE%\.fnchesttracker\update-signing-key.pem`.
+  **Back it up.** Without it, new releases cannot be signed and installed users would have to update by hand (a new
+  key also needs a new public key in the app).
+- `build-release.ps1` signs `dist/SHA256SUMS.txt` automatically and stops if the key is missing (`-AllowUnsigned`
+  builds anyway, but such a release is never offered by the updater). Manual use:
+  `dotnet run --project tools/ReleaseSigner -- sign dist/SHA256SUMS.txt` / `verify dist/SHA256SUMS.txt`.
+- Upload all files from `dist/` to the GitHub release.
+
+How installation works: the app downloads and verifies the package into `%LOCALAPPDATA%\FortniteChestTracker-Update`,
+copies its own executable there and starts it with `--apply-update`, then exits. The updater waits for the app to
+exit, moves the old program files to a backup, copies the new ones in, starts the new version and waits for it to
+report a successful start (`--after-update`); on any failure the backup is restored and the old version started.
+User data in `%LOCALAPPDATA%\FortniteChestTracker` is never touched. For testing, `CHESTTRACKER_UPDATE_API` points the
+check at another API base URL (plain HTTP is accepted only for a loopback server; signatures are still required).
 
 ## Running a server for development
 
@@ -158,7 +182,8 @@ id, state and confidence. For a detailed log set `"DiagnosticLog": true` in the 
 `settings.json`: state transitions, and rejected detections with the reason (at most every 2 s).
 
 **Measured on gameplay (November 2026, 8 Discord clips of ~30 s, 1080p, about 4 minutes).** Openings were annotated
-by hand from the footage; 4 complete chest openings (2 of them while spectating).
+by hand from the footage; 4 complete chest openings (2 of them by a player being spectated, which since 1.3.0 are
+deliberately not counted: the app pauses on Fortnite's "SPECTATING" banner, verified on both spectating clips).
 `tools/DetectionEval video` with the app's settings: 4 found, 0 missed, 0 false positives, 0 duplicates, latency
 from the annotated opening to the count 0.3 s on average (max 0.8 s). A fifth opening at the very end of a clip
 (one open frame before the clip ended) could not be confirmed. RTX 2060 with DirectML: 12–25 ms per frame

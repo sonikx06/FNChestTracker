@@ -73,6 +73,18 @@
     <s:String x:Key="Toast.Duplicate">Совпадает с автообнаружением — не засчитано повторно</s:String>
     <s:String x:Key="Toast.Cooldown">Пауза между обнаружениями</s:String>
     <s:String x:Key="Toast.NothingToRemove">Нечего удалять</s:String>
+    <s:String x:Key="Update.Title">Доступно обновление</s:String>
+    <s:String x:Key="Update.Version">Доступна версия Fortnite Chest Tracker {0} (у вас {1}).</s:String>
+    <s:String x:Key="Update.Prerelease">(предварительная версия)</s:String>
+    <s:String x:Key="Update.Notes">Что нового</s:String>
+    <s:String x:Key="Update.Now">Обновить</s:String>
+    <s:String x:Key="Update.Later">Позже</s:String>
+    <s:String x:Key="Update.Downloading">Загрузка…</s:String>
+    <s:String x:Key="Update.DownloadingPercent">Загрузка… {0}%</s:String>
+    <s:String x:Key="Update.Installing">Проверено. Программа закроется для установки и запустится снова.</s:String>
+    <s:String x:Key="Update.Cancelled">Загрузка отменена.</s:String>
+    <s:String x:Key="Update.Failed">Не удалось обновить: {0}. Текущая версия продолжает работать.</s:String>
+    <s:String x:Key="Toast.Updated">Обновлено до версии {0}</s:String>
     <s:String x:Key="Toast.NoMatch">Нет активного матча — нажмите «Начать матч»</s:String>
     <s:String x:Key="Toast.MatchStarted">Матч начат</s:String>
     <s:String x:Key="Toast.MatchEnded">Матч завершён: сундуков — {0}</s:String>
@@ -161,6 +173,8 @@
     <s:String x:Key="Det.Status.Running">Анализ экрана</s:String>
     <s:String x:Key="Det.Status.Candidate">Возможный сундук…</s:String>
     <s:String x:Key="Det.Status.Detected">Сундук обнаружен</s:String>
+    <s:String x:Key="Det.Status.Checking">Проверка экрана игры — пока не считаем</s:String>
+    <s:String x:Key="Det.Status.Spectating">Наблюдение — подсчёт приостановлен</s:String>
     <s:String x:Key="Det.Status.Paused">Пауза — начните матч, чтобы считать</s:String>
     <s:String x:Key="Det.Status.Error">Ошибка захвата</s:String>
     <s:String x:Key="Det.Backend">Способ захвата</s:String>
@@ -299,6 +313,9 @@
     <!-- Multiplayer -->
     <s:String x:Key="Nav.Party">Пати</s:String>
     <s:String x:Key="Ov.Team">КОМАНДА</s:String>
+    <s:String x:Key="Ov.TeamMatch">КОМАНДА · МАТЧ</s:String>
+    <s:String x:Key="Ov.TeamTotal">КОМАНДА · ВСЕГО</s:String>
+    <s:String x:Key="Ov.MeMatch">Я · МАТЧ</s:String>
     <s:String x:Key="Ov.Me">Я</s:String>
     <s:String x:Key="Hotkey.ToggleTeamOverlay">Оверлей: личный / командный</s:String>
     <s:String x:Key="Party.Title">Пати</s:String>

@@ -37,7 +37,9 @@ public sealed partial class OverlayViewModel : ObservableObject
 
     [ObservableProperty] private bool _teamMode;
     [ObservableProperty] private bool _inParty;
-    [ObservableProperty] private int _teamTotal;
+    [ObservableProperty] private string _teamMatchText = "—";
+    [ObservableProperty] private string _teamLifetimeText = "0";
+    [ObservableProperty] private bool _sharedMatchActive;
     [ObservableProperty] private string _teamName = "";
     [ObservableProperty] private string? _activityText;
     [ObservableProperty] private bool _showActivity;
@@ -70,22 +72,32 @@ public sealed partial class OverlayViewModel : ObservableObject
         ShowActivity = m.OverlayShowActivity;
     }
 
-    public void ApplyParty(ChestTracker.Protocol.PartyStateDto? party, Guid? me)
+    /// <summary>
+    /// Team numbers come from the same projection as the Party page (<see cref="ChestTracker.Sync.PartyStatistics"/>):
+    /// team match = active shared match total, team total = party lifetime (former members included). Your own
+    /// number on the overlay is your local match count, labelled as such.
+    /// </summary>
+    public void ApplyParty(ChestTracker.Sync.PartyStatistics? stats)
     {
-        InParty = party is not null;
+        InParty = stats is not null;
         TeamMembers.Clear();
-        if (party is null)
+        if (stats is null)
         {
+            SharedMatchActive = false;
+            TeamMatchText = "—";
+            TeamLifetimeText = "0";
             return;
         }
 
-        TeamName = party.Name;
-        var useMatch = party.ActiveMatch is not null;
-        TeamTotal = useMatch ? party.TeamMatch.Verified : party.TeamLifetime.Verified;
-        foreach (var m in party.Members)
+        TeamName = stats.PartyName;
+        SharedMatchActive = stats.SharedMatchActive;
+        TeamMatchText = ChestTracker.Sync.PartyStatistics.Format(stats.TeamMatch);
+        TeamLifetimeText = ChestTracker.Sync.PartyStatistics.Format(stats.TeamLifetime);
+        foreach (var m in stats.Members)
         {
-            var counts = useMatch ? m.Match : m.Lifetime;
-            TeamMembers.Add(new OverlayTeamMember(m.DisplayName, counts?.Verified.ToString() ?? "—", m.Online, m.PlayerId == me));
+            // During a shared match each member's match count, otherwise their party total (as on the Party page).
+            var counts = stats.SharedMatchActive ? m.Match : m.Lifetime;
+            TeamMembers.Add(new OverlayTeamMember(m.Name, ChestTracker.Sync.PartyStatistics.Format(counts), m.Online, m.IsMe));
         }
     }
 
@@ -182,7 +194,8 @@ public sealed partial class OverlayViewModel : ObservableObject
             DetectionStatus.Running => Frozen(Color.FromRgb(0x22, 0xC5, 0x5E)),
             DetectionStatus.Candidate => Frozen(Color.FromRgb(0xF5, 0x9E, 0x0B)),
             DetectionStatus.Detected => Frozen(Color.FromRgb(0xC0, 0x84, 0xFC)),
-            DetectionStatus.WaitingForGame or DetectionStatus.Paused => Frozen(Color.FromRgb(0x71, 0x71, 0x7A)),
+            DetectionStatus.WaitingForGame or DetectionStatus.Paused or DetectionStatus.Checking => Frozen(Color.FromRgb(0x71, 0x71, 0x7A)),
+            DetectionStatus.Spectating => Frozen(Color.FromRgb(0x38, 0xBD, 0xF8)),
             DetectionStatus.Error or DetectionStatus.Unsupported => Frozen(Color.FromRgb(0xF4, 0x3F, 0x5E)),
             _ => Frozen(Color.FromRgb(0x52, 0x52, 0x5B)),
         };

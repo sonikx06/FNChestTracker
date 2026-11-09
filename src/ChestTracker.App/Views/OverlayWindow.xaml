@@ -103,10 +103,23 @@
                     <StackPanel Orientation="Horizontal" Margin="0,-2,0,4">
                         <Path Data="{StaticResource ChestGeometry}" Fill="{Binding AccentBrush}" Width="22" Height="20" Stretch="Uniform"
                               VerticalAlignment="Center" Margin="0,0,10,0" Effect="{StaticResource TextShadow}" />
-                        <TextBlock Text="{Binding TeamTotal}" Style="{StaticResource OvNumber}" FontSize="36" c:Pulse.OnChange="{Binding TeamTotal}" />
+                        <!-- Team · match: the shared match total (— when no shared match is running) -->
+                        <StackPanel VerticalAlignment="Center">
+                            <TextBlock Text="{DynamicResource Ov.TeamMatch}" Style="{StaticResource OvLabel}" />
+                            <TextBlock Text="{Binding TeamMatchText}" Style="{StaticResource OvNumber}" FontSize="30"
+                                       c:Pulse.OnChange="{Binding TeamMatchText}" AutomationProperties.AutomationId="OvTeamMatch" />
+                        </StackPanel>
+                        <!-- Team · total: the party lifetime total, as on the Party page -->
                         <StackPanel VerticalAlignment="Center" Margin="14,0,0,0">
-                            <TextBlock Text="{DynamicResource Ov.Me}" Style="{StaticResource OvLabel}" />
-                            <TextBlock Text="{Binding MatchCount}" Style="{StaticResource OvNumber}" FontSize="18" Foreground="{Binding AccentBrush}" />
+                            <TextBlock Text="{DynamicResource Ov.TeamTotal}" Style="{StaticResource OvLabel}" />
+                            <TextBlock Text="{Binding TeamLifetimeText}" Style="{StaticResource OvNumber}" FontSize="18"
+                                       Foreground="{Binding AccentBrush}" AutomationProperties.AutomationId="OvTeamTotal" />
+                        </StackPanel>
+                        <!-- Me: this player's own count in the current match -->
+                        <StackPanel VerticalAlignment="Center" Margin="14,0,0,0">
+                            <TextBlock Text="{DynamicResource Ov.MeMatch}" Style="{StaticResource OvLabel}" />
+                            <TextBlock Text="{Binding MatchCount}" Style="{StaticResource OvNumber}" FontSize="18"
+                                       AutomationProperties.AutomationId="OvMyMatch" />
                         </StackPanel>
                     </StackPanel>
                     <Rectangle Height="1" Fill="{Binding AccentBrush}" Opacity="0.35" Margin="0,0,0,4" />

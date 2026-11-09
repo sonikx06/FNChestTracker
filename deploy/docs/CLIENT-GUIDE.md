@@ -2,7 +2,7 @@
 
 ## English
 
-**Install.** Unzip `Client/` anywhere and run `FortniteChestTracker.exe`, or `Start Chest Tracker.cmd`. You don't need
+**Install.** Unzip `FortniteChestTracker-win-x64.zip` anywhere and run `FortniteChestTracker.exe` (keep the `models` folder next to it). You don't need
 .NET or an installer. Requires Windows 10 1903+ or Windows 11, x64.
 
 **Play solo.** Everything works offline. Default hotkeys:
@@ -47,7 +47,7 @@ and **total matches**.
 
 ## Русский
 
-**Установка.** Распакуйте папку `Client/` и запустите `FortniteChestTracker.exe` или `Start Chest Tracker.cmd`.
+**Установка.** Распакуйте `FortniteChestTracker-win-x64.zip` и запустите `FortniteChestTracker.exe` (папка `models` должна лежать рядом).
 Устанавливать .NET не нужно. Требуется Windows 10 1903+ или Windows 11, x64.
 
 **Один.** Всё работает без интернета. Клавиши по умолчанию:

@@ -30,11 +30,19 @@ public partial class App : Application
     private TrayService? _tray;
     private DiscordPresenceService? _discord;
     private PresenceCoordinator? _presence;
+    private UpdateService? _updates;
     private bool _shuttingDown;
 
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+
+        // Updater process (a copy of the previous executable): install the downloaded version, then exit.
+        if (e.Args.Contains("--apply-update"))
+        {
+            Shutdown(UpdaterMode.Run(e.Args));
+            return;
+        }
 
         // Developer helper: render the Discord art assets and exit.
         var exportIndex = Array.IndexOf(e.Args, "--export-discord-assets");
@@ -172,6 +180,66 @@ public partial class App : Application
         _overlay.Sync();
         ReportStartup(report, recovery);
         SessionEnding += (_, _) => ExitApplication();
+
+        // Started by the updater: confirm a successful start (otherwise the updater restores the previous version).
+        var markerIndex = Array.IndexOf(e.Args, UpdaterMode.StartedMarkerArg);
+        if (markerIndex >= 0 && markerIndex + 1 < e.Args.Length)
+        {
+            try
+            {
+                System.IO.File.WriteAllText(e.Args[markerIndex + 1], UpdateService.Current().ToString());
+            }
+            catch (Exception ex)
+            {
+                Log.Warn("Could not confirm the update", ex);
+            }
+        }
+
+        if (UpdateService.TakeResult() is { } last)
+        {
+            _main.ShowToast(last.Success ? Loc.F("Toast.Updated", last.To) : last.Message, last.Success ? ToastKind.Success : ToastKind.Error);
+        }
+
+        StartUpdateCheck();
+    }
+
+    /// <summary>Checks GitHub in the background; never delays or blocks startup, offline is fine.</summary>
+    private void StartUpdateCheck()
+    {
+        _updates = new UpdateService();
+        var updates = _updates;
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(TimeSpan.FromSeconds(3));
+            var result = await updates.CheckAsync();
+            if (result is { Status: Core.Updates.UpdateCheckStatus.Available, Release: { } release })
+            {
+                await Dispatcher.BeginInvoke(() => OfferUpdate(release));
+            }
+        });
+    }
+
+    private void OfferUpdate(Core.Updates.ReleaseInfo release)
+    {
+        if (_shuttingDown || _updates is null)
+        {
+            return;
+        }
+
+        var dialog = new UpdateWindow(_updates, release);
+        if (_window is { IsVisible: true })
+        {
+            dialog.Owner = _window;
+        }
+        else
+        {
+            dialog.WindowStartupLocation = WindowStartupLocation.CenterScreen;
+        }
+
+        if (dialog.ShowDialog() == true && dialog.ReadyToInstall)
+        {
+            ExitApplication(); // the updater waits for this process to exit before replacing any file
+        }
     }
 
     public void ShowMainWindow()
@@ -223,6 +291,7 @@ public partial class App : Application
             _overlay?.Close();
             _main?.Dispose();
             _services?.Database.Dispose();
+            _updates?.Dispose();
         }
         catch (Exception ex)
         {

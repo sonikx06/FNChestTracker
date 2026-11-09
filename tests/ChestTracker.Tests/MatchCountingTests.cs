@@ -51,10 +51,23 @@ public class MatchCountingTests : IDisposable
 
     private static readonly byte[] Pixels = new byte[16 * 16 * 4];
 
+    /// <summary>Screen check stand-in: the test decides whether the spectator banner is visible.</summary>
+    public sealed class FakeSpectatorProbe : ISpectatorProbe
+    {
+        public bool Available { get; set; } = true;
+        public bool? Spectating { get; set; } = false;
+        public bool? IsSpectating(ReadOnlySpan<byte> bgra, int width, int height, int stride) => Spectating;
+    }
+
+    /// <summary>One clean frame is enough to confirm normal play in these tests (the app needs ~2 s).</summary>
+    public static readonly GameplayStateOptions QuickGameplay = new() { PlayingAfter = 1, PlayingAfterTime = TimeSpan.Zero };
+
+    private readonly FakeSpectatorProbe _probe = new();
+
     private (MatchDetectionController Controller, ScriptedDetector Detector) Detection(TrackingEngine engine)
     {
         var detector = new ScriptedDetector();
-        var controller = new MatchDetectionController(engine)
+        var controller = new MatchDetectionController(engine, QuickGameplay)
         {
             Pipeline = new YoloChestPipeline(detector, YoloSettings.TrackingOptionsFor(new DetectionSettings())),
         };
@@ -62,7 +75,7 @@ public class MatchCountingTests : IDisposable
     }
 
     /// <summary>One captured frame through the controller exactly like the app's inference thread does it.</summary>
-    private static DetectionFrameResult? Frame(MatchDetectionController c, TrackingEngine engine, int index, Detection[] detections,
+    private DetectionFrameResult? Frame(MatchDetectionController c, TrackingEngine engine, int index, Detection[] detections,
         ScriptedDetector d)
     {
         d.Frames.Enqueue(detections);
@@ -73,7 +86,8 @@ public class MatchCountingTests : IDisposable
         }
 
         return c.Process(ticket, Pixels, 16, 16, 64, T0.AddMilliseconds(125 * index),
-            (decision, match) => DetectionCounting.Apply(engine, decision, false, true, trackedIdentity: true, expectedMatchId: match));
+            (decision, match) => DetectionCounting.Apply(engine, decision, false, true, trackedIdentity: true, expectedMatchId: match),
+            _probe);
     }
 
     private static int AutoEvents(TempDatabase db) => db.Repo.GetAllEvents().Count(e => e.Source == EventSource.Automatic && e.Kind == ChestEventKind.Add);
@@ -315,7 +329,9 @@ public class MatchCountingTests : IDisposable
         var model = BuiltIn();
         var project = Path.Combine(Path.GetDirectoryName(Path.GetDirectoryName(model))!, "ChestTracker.App.csproj");
         var xml = File.ReadAllText(project);
-        Assert.Contains(@"<None Include=""models\best.onnx"" CopyToOutputDirectory=""PreserveNewest"" CopyToPublishDirectory=""PreserveNewest"" />", xml);
+        // Copied next to the executable and kept outside the single-file bundle (it is opened from disk).
+        Assert.Contains(@"<None Include=""models\best.onnx"" CopyToOutputDirectory=""PreserveNewest"" CopyToPublishDirectory=""PreserveNewest"" ExcludeFromSingleFile=""true"" />", xml);
+        Assert.Contains(@"<ApplicationIcon>Assets\app.ico</ApplicationIcon>", xml);
         Assert.True(new FileInfo(model).Length > 1_000_000);
     }
 }

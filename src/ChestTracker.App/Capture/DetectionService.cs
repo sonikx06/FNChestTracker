@@ -21,6 +21,12 @@ public enum DetectionStatus
 
     /// <summary>Automatic/hybrid mode, but no match is running: nothing is captured or counted.</summary>
     Paused,
+
+    /// <summary>The match is running but the screen state is not confirmed yet (or cannot be checked): not counting.</summary>
+    Checking,
+
+    /// <summary>Fortnite shows the spectator view: the player was eliminated, nothing is counted.</summary>
+    Spectating,
 }
 
 /// <param name="Detail">Supporting evidence (frames per state, confidences, state path).</param>
@@ -51,6 +57,7 @@ public sealed class DetectionService : IDisposable
     private readonly Timer _watchdog;
     private readonly InferenceWorker _worker;
     private readonly string _modelPath;
+    private readonly ISpectatorProbe _probe;
     private ICaptureSource? _source;
     private DetectionSettings _settings;
     private TrackingMode _mode;
@@ -59,9 +66,16 @@ public sealed class DetectionService : IDisposable
     private bool _disposed;
     private bool _modelAttempted;
     private DateTimeOffset _nextRejectLog;
+    private DateTimeOffset _nextStateLog;
+    private CaptureTarget? _target;
+    private long _lastFrameTicks;
+
+    /// <summary>No frame for this long from a "running" capture means its window is gone (WGC does not always say so).</summary>
+    private static readonly TimeSpan CaptureStall = TimeSpan.FromSeconds(6);
 
     /// <param name="modelPath">Built-in model; tests and tools may pass another file, the app never does.</param>
-    public DetectionService(TrackingEngine engine, DetectionSettings settings, TrackingMode mode, string? modelPath = null)
+    public DetectionService(TrackingEngine engine, DetectionSettings settings, TrackingMode mode, string? modelPath = null,
+        ISpectatorProbe? probe = null)
     {
         _engine = engine;
         _settings = Clone(settings);
@@ -69,6 +83,9 @@ public sealed class DetectionService : IDisposable
         _modelPath = modelPath ?? BuiltInModelPath;
         _controller = new MatchDetectionController(engine);
         _controller.CountingChanged += (_, _) => ThreadPool.QueueUserWorkItem(_ => OnCountingChanged());
+        _controller.GameplayChanged += (_, state) => OnGameplayChanged(state);
+        _probe = probe ?? new OcrSpectatorProbe();
+        Log.Info(_probe is OcrSpectatorProbe ocr ? $"Spectator check: {ocr.Description}" : "Spectator check: custom probe");
         _worker = new InferenceWorker(ProcessFrame);
         IsCaptureSupported = WgcCaptureSource.IsSupported();
         _watchdog = new Timer(_ => Watchdog(), null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(3));
@@ -113,8 +130,37 @@ public sealed class DetectionService : IDisposable
 
     public bool IsActiveMode => _mode is TrackingMode.Automatic or TrackingMode.Hybrid;
 
-    /// <summary>True while a match is running and detected openings are counted.</summary>
+    /// <summary>True while a match is running, the player is playing (not spectating) and openings are counted.</summary>
     public bool IsCounting => _controller.IsCounting;
+
+    /// <summary>Playing / Spectating / Unknown, from the spectator banner check.</summary>
+    public GameplayState GameplayState => _controller.GameplayState;
+
+    /// <summary>Spectator view or unconfirmed screen state: automatic counting is paused until normal play is seen.</summary>
+    private void OnGameplayChanged(GameplayState state)
+    {
+        _worker.Clear();
+        Log.Info(state switch
+        {
+            GameplayState.Spectating => "Spectator view detected: automatic counting paused (the match keeps running)",
+            GameplayState.Playing => "Normal play detected: automatic counting active",
+            _ => "Screen state unknown: automatic counting paused",
+        });
+        lock (_gate)
+        {
+            if (_source is not null)
+            {
+                SetStatusLocked(StatusFor(state));
+            }
+        }
+    }
+
+    private static DetectionStatus StatusFor(GameplayState state) => state switch
+    {
+        GameplayState.Playing => DetectionStatus.Running,
+        GameplayState.Spectating => DetectionStatus.Spectating,
+        _ => DetectionStatus.Checking,
+    };
 
     public void Configure(DetectionSettings settings, TrackingMode mode)
     {
@@ -152,7 +198,7 @@ public sealed class DetectionService : IDisposable
     private void OnCountingChanged()
     {
         _worker.Clear();
-        if (_controller.IsCounting)
+        if (_controller.IsMatchActive)
         {
             Log.Info("Counting started: chest detection active for the new match");
             Watchdog();
@@ -232,14 +278,17 @@ public sealed class DetectionService : IDisposable
                     return;
                 }
 
-                if (!_controller.IsCounting)
+                if (!_controller.IsMatchActive)
                 {
                     StopCaptureLocked();
                     SetStatusLocked(DetectionStatus.Paused);
                     return;
                 }
 
-                if (_source?.IsRunning == true)
+                var stalled = _source?.IsRunning == true
+                              && ((_target is { WindowHandle: var h } && h != IntPtr.Zero && !Interop.NativeMethods.IsWindow(h))
+                                  || TimeSpan.FromTicks(Environment.TickCount64 * TimeSpan.TicksPerMillisecond - Interlocked.Read(ref _lastFrameTicks)) > CaptureStall);
+                if (_source?.IsRunning == true && !stalled)
                 {
                     if (_status == DetectionStatus.Detected && DateTimeOffset.UtcNow > _detectedUntil)
                     {
@@ -247,6 +296,14 @@ public sealed class DetectionService : IDisposable
                     }
 
                     return;
+                }
+
+                // A capture whose window went away (game closed or restarted) without reporting it: drop it so a new
+                // capture of the current window can start.
+                if (_source is not null)
+                {
+                    Log.Info("Capture source stopped; reconnecting to the game window");
+                    StopCaptureLocked();
                 }
             }
 
@@ -287,7 +344,7 @@ public sealed class DetectionService : IDisposable
 
             lock (_gate)
             {
-                if (!IsActiveMode || _disposed || !_controller.IsCounting || _source is not null)
+                if (!IsActiveMode || _disposed || !_controller.IsMatchActive || _source?.IsRunning == true)
                 {
                     source.FrameCaptured -= OnFrame;
                     source.Failed -= OnSourceFailed;
@@ -295,10 +352,14 @@ public sealed class DetectionService : IDisposable
                     return;
                 }
 
+                StopCaptureLocked();
                 _source = source;
+                _target = target;
+                Interlocked.Exchange(ref _lastFrameTicks, Environment.TickCount64 * TimeSpan.TicksPerMillisecond);
                 TargetDescription = target.Description;
-                LastError = null;
-                SetStatusLocked(DetectionStatus.Running);
+                LastError = _probe.Available ? null
+                    : "Spectator check unavailable: Windows OCR (English) is not installed. Automatic counting stays paused; add English in Windows language settings.";
+                SetStatusLocked(StatusFor(_controller.GameplayState));
             }
         }
         catch (Exception ex)
@@ -330,7 +391,10 @@ public sealed class DetectionService : IDisposable
             }
         }
 
+        Interlocked.Exchange(ref _lastFrameTicks, Environment.TickCount64 * TimeSpan.TicksPerMillisecond);
+
         // The ticket records which match this frame belongs to; no match → the frame is not analysed at all.
+        // During a match every frame is admitted: the spectator check must see it even while counting is paused.
         if (_controller.Admit() is { } ticket)
         {
             _worker.Submit(frame, ticket);
@@ -350,13 +414,24 @@ public sealed class DetectionService : IDisposable
         {
             var outcome = _controller.Process(ticket, frame.Pixels, frame.Width, frame.Height, frame.Stride, frame.Timestamp,
                 (decision, matchId) => DetectionCounting.Apply(_engine, decision, settings.TestMode, settings.QueueUncertain,
-                    trackedIdentity: true, expectedMatchId: matchId));
+                    trackedIdentity: true, expectedMatchId: matchId),
+                _probe);
+            if (settings.DiagnosticLog && frame.Timestamp >= _nextStateLog)
+            {
+                _nextStateLog = frame.Timestamp.AddSeconds(2);
+                Log.Info($"Detection frame: state={outcome?.State.ToString() ?? "stale"} analysed={outcome?.Frame is not null} ticket={ticket.Generation} detections={outcome?.Frame?.Detections.Count ?? 0}");
+            }
+
             if (outcome is null)
             {
                 return; // counting stopped while this frame was in flight
             }
 
-            var result = outcome.Frame;
+            if (outcome.Frame is not { } result)
+            {
+                return; // spectating or state not confirmed: the model was not run on this frame
+            }
+
             LastInferenceMs = result.ElapsedMs;
 
             // "Candidate": a chest confirmed closed is now seen open, one more open frame will count it.
@@ -367,7 +442,7 @@ public sealed class DetectionService : IDisposable
             var state = watching.Count > 0 ? DetectorState.Candidate : DetectorState.Idle;
             lock (_gate)
             {
-                if (_status is DetectionStatus.Running or DetectionStatus.Candidate)
+                if (_status is DetectionStatus.Running or DetectionStatus.Candidate or DetectionStatus.Checking)
                 {
                     SetStatusLocked(state == DetectorState.Candidate ? DetectionStatus.Candidate : DetectionStatus.Running);
                 }
@@ -495,6 +570,7 @@ public sealed class DetectionService : IDisposable
         }
 
         _source = null;
+        _target = null;
         TargetDescription = null;
     }
 

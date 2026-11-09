@@ -45,7 +45,8 @@ In-game overlay:
 ## Features
 
 - **Automatic chest detection** with a built-in AI model. It recognises a chest that goes from closed to open on your
-  screen and counts it once. *Beta: it works on the gameplay it was tested on, but it will sometimes miss chests.*
+  screen and counts it once, and pauses while you are spectating after being eliminated. *Beta: it works on the
+  gameplay it was tested on, but it will sometimes miss chests.*
 - **Manual counting** with hotkeys (F8 adds a chest, F7 removes the last one) or the on-screen +1 / −1 buttons.
 - **Three tracking modes:** Manual, Automatic, and Hybrid (automatic detection plus hotkeys to correct it; a chest
   counted both ways is counted once).
@@ -61,13 +62,15 @@ In-game overlay:
 - **Discord Rich Presence:** shows your match and chest count on your Discord profile.
 - **Configurable hotkeys** (keyboard or the mouse side buttons Mouse4/Mouse5), **sound notifications**, English and
   Russian interface, automatic backups of your data.
+- **Automatic updates:** at startup the app checks GitHub for a newer version and, if you agree, downloads, verifies
+  and installs it, then restarts. Your statistics and settings are kept.
 
 ## Installation
 
 1. Open the [Releases page](https://github.com/sonikx06/FNChestTracker/releases) and pick the newest release.
 2. Download **`FortniteChestTracker-win-x64.zip`**.
 3. Right-click the ZIP → **Extract All…**, and extract it to a folder of your choice (for example `Documents`).
-   Keep all files together: the app needs the files and the `models` folder next to it.
+   It contains `FortniteChestTracker.exe` and a `models` folder; keep them together.
 4. Open the extracted folder and start **`FortniteChestTracker.exe`**.
    Windows may show "Windows protected your PC" because the app is new and not code-signed: click **More info** →
    **Run anyway**.
@@ -76,7 +79,14 @@ In-game overlay:
 6. Choose a tracking mode on the dashboard (Manual, Hybrid or Auto), press **F9** when your match starts, and play.
 
 No installer, administrator rights or extra downloads are needed (the .NET runtime and the AI model are included).
+The first start takes a few seconds longer while Windows unpacks the app's components.
 To uninstall, delete the folder; your statistics are in `%LOCALAPPDATA%\FortniteChestTracker`.
+
+**Updates.** When a new version is published, the app shows "Update available" with the changes a few seconds after
+it starts. **Update now** downloads it, checks that it is the genuine package (a digital signature from this project
+and a checksum), closes the app, replaces the program files, and starts the new version. If anything goes wrong, the
+previous version is restored automatically. **Later** asks again at the next start. Updating from version 1.2.0 or
+older must be done once by hand (download the new ZIP), because those versions had no updater.
 
 ## How to use
 
@@ -86,8 +96,8 @@ F9 starts a new match. While no match is running, chest keys and automatic detec
 
 **Automatic detection.** Select **Auto** or **Hybrid** mode. While a match is running, the app watches the Fortnite
 window and counts a chest when it sees the same chest closed and then open. The status dot shows whether it is
-analysing, paused (no match) or waiting for the Fortnite window. Unsure cases go to a review list on the dashboard,
-where you count or reject them.
+analysing, paused (no match), spectating, or waiting for the Fortnite window. Unsure cases go to a review list on the
+dashboard, where you count or reject them.
 
 **Add or undo a chest manually.** Press **F8** (or **+1**) after opening a chest, **F7** (or **−1**) to remove the
 last one. In Automatic mode hotkeys are disabled so they cannot double-count; use Hybrid if you want both.
@@ -111,13 +121,19 @@ How it decides:
 - a chest counts only after the app saw it **closed** and then **open**, so looking at a chest, or a chest that is
   already open when you arrive, never counts;
 - each chest counts once, even if you keep looking at it;
-- nothing is counted outside a running match.
+- nothing is counted outside a running match;
+- nothing is counted while you are **spectating**: when you are eliminated and watch a teammate, the app sees Fortnite's
+  "SPECTATING" banner and pauses, so your teammate's chests are not counted as yours. It resumes by itself when you are
+  back in play (for example after a reboot) or in your next match. A match is never started or ended by this.
 
 Detection quality depends on what is on screen: distance, lighting, effects, skins, chest types and graphics settings.
 The model was trained on a small dataset and checked on a few minutes of real gameplay, so it **will** miss some
-chests and can make mistakes. Use **Hybrid** mode if you want to fix those with hotkeys. Chests opened by a player you
-are spectating are counted too. If you want to help improve it, recordings and labelled screenshots are welcome
-(see [CONTRIBUTING.md](CONTRIBUTING.md)).
+chests and can make mistakes. Use **Hybrid** mode if you want to fix those with hotkeys. The spectator check reads
+the banner with the text recognition built into Windows; it was checked on English-language Fortnite. If your game
+is in another language, or Windows has no English text recognition installed, the status stays at "Checking the game
+screen" and automatic counting stays paused (use manual counting, or add English under Windows **Settings → Time &
+language → Language**). If you want to help improve detection, recordings and labelled screenshots are welcome (see
+[CONTRIBUTING.md](CONTRIBUTING.md)).
 
 ## Multiplayer
 
@@ -143,13 +159,16 @@ Parties need a **server**. There is no public server: one person in your group r
   who left or were removed.
 - The chest sound plays only on the PC of the player who opened the chest; teammates' chests update your counters
   silently.
+- In the overlay's team view: **TEAM · MATCH** is the shared match total (— when no shared match is running),
+  **TEAM · TOTAL** is the party's all-time total (the same two numbers as on the Party page), and **ME · MATCH** is
+  your own count in the current match.
 - You can hide your counts from the party, leave, or delete your data from the server at any time. Your local
   statistics are never affected.
 
 ## System requirements
 
 - Windows 10 (version 1903 or newer) or Windows 11, 64-bit (x64).
-- About 350 MB of disk space. No .NET installation needed.
+- About 150 MB of disk space for the app (plus about 300 MB unpacked by Windows on first start). No .NET installation needed.
 - Automatic detection: a DirectX 12 graphics card is recommended (it works on the processor too, with more CPU load).
   Fortnite should run in **Windowed Fullscreen** (borderless) for screen capture and the overlay.
 - Multiplayer: a server run by someone in your group (see above). Discord Rich Presence: the Discord desktop app.
@@ -163,6 +182,8 @@ Parties need a **server**. There is no public server: one person in your group r
 | A hotkey does not work | **Settings → Hotkeys** shows each key's status: a key used by another program shows "Used by another application"; choose a different key. Make sure the global hotkey switch is on. In Automatic mode the chest keys are disabled on purpose. |
 | Multiplayer connection fails | Check the server address (including `http://` or `https://` and the port) with **Test server** on the Server page. The server's firewall must allow the port. "Incompatible version" means the app and the server need the same release. |
 | The overlay does not appear | Turn it on (switch at the bottom left, or F6) and run Fortnite in **Windowed Fullscreen**: windows cannot appear above exclusive fullscreen. If it is off-screen, press **Move** on the dashboard. |
+| Status "Checking the game screen — not counting yet" for a long time | The spectator check needs Windows' English text recognition. Add English in Windows **Settings → Time & language → Language** (the detection page shows a note when it is missing). It also needs Fortnite in English to recognise the banner. |
+| "Update failed" | The current version keeps working; the reason is shown and logged in `%LOCALAPPDATA%\FortniteChestTracker-Update\update.log`. You can always download the new ZIP by hand. If the app folder is not writable (for example inside `Program Files`), move it to your Documents folder. |
 | "The built-in chest model is missing / could not be loaded" | The `models` folder next to `FortniteChestTracker.exe` is missing or damaged. Download the ZIP again and extract it completely. Manual counting keeps working meanwhile. |
 
 ## Privacy and fair play
@@ -177,6 +198,9 @@ Parties need a **server**. There is no public server: one person in your group r
   username and password, which the server stores only as a salted hash) and your chest events after you joined a party (time, +1/−1, manual or
   automatic, match). No screenshots, game data or Epic/Fortnite account information are ever sent.
 - **Discord (optional):** the app talks to the Discord app on your PC; it never asks for your Discord login.
+- **Update check:** at startup the app asks GitHub's public API which releases exist (it sends only its version in
+  the User-Agent). Downloads come from this repository's GitHub Releases and are installed only if their signature
+  checks out.
 - There is no telemetry or analytics. The only other network request is a check of the app's public image list on
   Discord's API when Discord Rich Presence is on.
 

@@ -11,6 +11,7 @@
     <RootNamespace>ChestTracker.App</RootNamespace>
     <AssemblyName>FortniteChestTracker</AssemblyName>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\app.ico</ApplicationIcon>
     <PlatformTarget>x64</PlatformTarget>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SelfContained>false</SelfContained>
@@ -39,11 +40,21 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- Bundled YOLOv8 chest model (closed_chest / open_chest). Published next to the executable as models\best.onnx. -->
-    <None Include="models\best.onnx" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <!-- Official chest logo as a multi-size icon: embedded in the .exe (Explorer) and used by the window and taskbar. -->
+    <Resource Include="Assets\app.ico" />
+    <!-- Bundled YOLOv8 chest model (closed_chest / open_chest). Published next to the executable as models\best.onnx.
+         Kept outside the single-file bundle: the model is opened from disk by path. -->
+    <None Include="models\best.onnx" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
     <!-- DirectML runtime for GPU inference (Microsoft.AI.DirectML, a dependency of Microsoft.ML.OnnxRuntime.DirectML).
          The package copies it only for C++ projects; without it Windows' older System32 copy would be used. -->
     <None Include="$(NuGetPackageRoot)microsoft.ai.directml\1.15.2\bin\x64-win\DirectML.dll" Link="DirectML.dll"
           CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Visible="false" />
   </ItemGroup>
+
+  <!-- Native import libraries (.lib) are build-time files only; never ship them. -->
+  <Target Name="DropNativeImportLibraries" AfterTargets="ComputeResolvedFilesToPublishList">
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)" Condition="'%(Extension)' == '.lib'" />
+    </ItemGroup>
+  </Target>
 </Project>

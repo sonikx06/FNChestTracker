@@ -12,9 +12,9 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
-        var icon = IconFactory.CreateBitmap(64);
-        Icon = icon;
-        Logo.Source = icon;
+        // Window and taskbar use the embedded app.ico (same file as the executable's icon); the sidebar logo stays drawn.
+        Icon = System.Windows.Media.Imaging.BitmapFrame.Create(new Uri("pack://application:,,,/Assets/app.ico"));
+        Logo.Source = IconFactory.CreateBitmap(64);
         SourceInitialized += (_, _) => ApplyDarkChrome();
         StateChanged += OnStateChanged;
     }

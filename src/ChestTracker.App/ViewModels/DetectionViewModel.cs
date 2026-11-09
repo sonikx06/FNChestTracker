@@ -91,7 +91,7 @@ public sealed partial class DetectionViewModel : ObservableObject, IDisposable
         StatusText = Loc.T("Det.Status." + d.Status);
         IsRunning = d.Status is DetectionStatus.Running or DetectionStatus.Candidate or DetectionStatus.Detected;
         SourceText = d.TargetDescription ?? "";
-        ErrorText = d.Status == DetectionStatus.Error ? d.LastError : null;
+        ErrorText = d.Status is DetectionStatus.Error or DetectionStatus.Checking ? d.LastError : null;
         ModelText = d.ModelDescription ?? Loc.T("Det.ModelNotLoaded");
         ModelError = d.ModelError;
         OnPropertyChanged(nameof(IsActiveMode));

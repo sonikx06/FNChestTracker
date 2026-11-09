@@ -73,6 +73,18 @@
     <s:String x:Key="Toast.Duplicate">Matches the automatic detection — not counted twice</s:String>
     <s:String x:Key="Toast.Cooldown">Detection cooldown</s:String>
     <s:String x:Key="Toast.NothingToRemove">Nothing to remove</s:String>
+    <s:String x:Key="Update.Title">Update available</s:String>
+    <s:String x:Key="Update.Version">Fortnite Chest Tracker {0} is available (you have {1}).</s:String>
+    <s:String x:Key="Update.Prerelease">(pre-release)</s:String>
+    <s:String x:Key="Update.Notes">What's new</s:String>
+    <s:String x:Key="Update.Now">Update now</s:String>
+    <s:String x:Key="Update.Later">Later</s:String>
+    <s:String x:Key="Update.Downloading">Downloading…</s:String>
+    <s:String x:Key="Update.DownloadingPercent">Downloading… {0}%</s:String>
+    <s:String x:Key="Update.Installing">Verified. Closing to install; the app restarts by itself.</s:String>
+    <s:String x:Key="Update.Cancelled">Download cancelled.</s:String>
+    <s:String x:Key="Update.Failed">Update failed: {0}. The current version keeps working.</s:String>
+    <s:String x:Key="Toast.Updated">Updated to version {0}</s:String>
     <s:String x:Key="Toast.NoMatch">No active match — press “Start Match”</s:String>
     <s:String x:Key="Toast.MatchStarted">Match started</s:String>
     <s:String x:Key="Toast.MatchEnded">Match ended: {0} chests</s:String>
@@ -162,6 +174,8 @@
     <s:String x:Key="Det.Status.Candidate">Possible chest…</s:String>
     <s:String x:Key="Det.Status.Detected">Chest detected</s:String>
     <s:String x:Key="Det.Status.Error">Capture error</s:String>
+    <s:String x:Key="Det.Status.Checking">Checking the game screen — not counting yet</s:String>
+    <s:String x:Key="Det.Status.Spectating">Spectating — not counting</s:String>
     <s:String x:Key="Det.Status.Paused">Paused — start a match to count</s:String>
     <s:String x:Key="Det.Backend">Capture method</s:String>
     <s:String x:Key="Backend.WindowsGraphicsCapture">Windows Graphics Capture</s:String>
@@ -299,6 +313,9 @@
     <!-- Multiplayer -->
     <s:String x:Key="Nav.Party">Party</s:String>
     <s:String x:Key="Ov.Team">TEAM</s:String>
+    <s:String x:Key="Ov.TeamMatch">TEAM · MATCH</s:String>
+    <s:String x:Key="Ov.TeamTotal">TEAM · TOTAL</s:String>
+    <s:String x:Key="Ov.MeMatch">ME · MATCH</s:String>
     <s:String x:Key="Ov.Me">ME</s:String>
     <s:String x:Key="Hotkey.ToggleTeamOverlay">Overlay: personal / team</s:String>
     <s:String x:Key="Party.Title">Party</s:String>

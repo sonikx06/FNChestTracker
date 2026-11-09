@@ -13,7 +13,10 @@ param(
     [string]$Configuration = 'Release',
     [string]$OutputName = 'ChestTracker-Release',
     [switch]$SkipTests,
-    [switch]$SkipZip
+    [switch]$SkipZip,
+    # Release assets are signed for the in-app updater with the key from tools/ReleaseSigner (see CONTRIBUTING.md).
+    [string]$SigningKey = (Join-Path $env:USERPROFILE '.fnchesttracker\update-signing-key.pem'),
+    [switch]$AllowUnsigned
 )
 
 $ErrorActionPreference = 'Stop'
@@ -66,9 +69,14 @@ New-Item -ItemType Directory -Force $clientDir, $winDir, $linuxDir, $docsDir | O
 $common = @('-c', $Configuration, '--self-contained', 'true', '-p:DebugType=none', '-p:DebugSymbols=false', '--nologo')
 
 # ------------------------------------------------------------------ 2. client
-Step 'Publishing desktop client (win-x64, self-contained)'
-Invoke-Dotnet (@('publish', (Join-Path $root 'src/ChestTracker.App'), '-r', 'win-x64', '-o', $clientDir) + $common)
-Copy-Item (Join-Path $root 'deploy/client/*') $clientDir
+Step 'Publishing desktop client (win-x64, self-contained single file)'
+# One executable (runtime, WPF, ONNX Runtime, DirectML and OpenCV inside; native parts are unpacked to %TEMP%\.net on
+# first start) plus models\best.onnx, which is opened from disk. No trimming: WPF and the reflection-based libraries
+# are not trim-safe.
+Invoke-Dotnet (@('publish', (Join-Path $root 'src/ChestTracker.App'), '-r', 'win-x64', '-o', $clientDir,
+    '-p:PublishSingleFile=true', '-p:IncludeNativeLibrariesForSelfExtract=true', '-p:EnableCompressionInSingleFile=true') + $common)
+$unexpected = Get-ChildItem $clientDir -Recurse -File | Where-Object { $_.Name -notin @('FortniteChestTracker.exe', 'best.onnx') }
+if ($unexpected) { throw "Unexpected files in the single-file client: $($unexpected.Name -join ', ')" }
 $model = Join-Path $clientDir 'models/best.onnx'
 if (-not (Test-Path $model)) { throw "The chest model is missing from the client: $model (expected src/ChestTracker.App/models/best.onnx)." }
 
@@ -174,6 +182,16 @@ if (-not $SkipZip) {
     Get-ChildItem $dist -Filter *.zip | Sort-Object Name | ForEach-Object {
         "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant())  $($_.Name)"
     } | Set-Content (Join-Path $dist 'SHA256SUMS.txt') -Encoding ascii
+
+    # Sign the checksums: the updater installs nothing whose SHA256SUMS.txt is not signed with this project's key.
+    if (Test-Path $SigningKey) {
+        Invoke-Dotnet @('run', '--project', (Join-Path $root 'tools/ReleaseSigner'), '-c', $Configuration, '--', 'sign',
+            (Join-Path $dist 'SHA256SUMS.txt'), $SigningKey)
+    } elseif ($AllowUnsigned) {
+        Write-Warning "No signing key at ${SigningKey}: release assets are NOT signed; the in-app updater will not offer them."
+    } else {
+        throw "Signing key not found: ${SigningKey} (create one with 'dotnet run --project tools/ReleaseSigner -- keygen', or pass -AllowUnsigned)."
+    }
     Get-ChildItem $dist | ForEach-Object { Write-Host ("  {0} ({1:N1} MB)" -f $_.Name, ($_.Length / 1MB)) -ForegroundColor Green }
 }
 
