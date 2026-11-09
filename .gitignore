@@ -18,6 +18,8 @@ tools/pg-dev-connection.txt
 tools/pgpass.txt
 ChestTracker.zip
 *.onnx
+# The chest model that ships with the app is part of the source.
+!src/ChestTracker.App/models/best.onnx
 tools/yolo/data/
 tools/yolo/runs/
 tools/yolo/export/

@@ -24,6 +24,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\ChestTracker.Server\ChestTracker.Server.csproj" />
     <ProjectReference Include="..\..\src\ChestTracker.Sync\ChestTracker.Sync.csproj" />
+    <ProjectReference Include="..\..\src\ChestTracker.Vision\ChestTracker.Vision.csproj" />
   </ItemGroup>
 
 </Project>

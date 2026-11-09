@@ -151,10 +151,11 @@ public sealed class DetectionSettings
 
     public bool QueueUncertain { get; set; } = true;
 
-    /// <summary>EXPERIMENTAL: heuristic gold-burst detector (default) or a YOLOv8 ONNX model.</summary>
-    public DetectionEngine Engine { get; set; } = DetectionEngine.Heuristic;
+    /// <summary>YOLOv8 ONNX model (default; the model ships with the app) or the experimental heuristic gold-burst detector.
+    /// Only one engine runs at a time, so the two can never both count the same opening.</summary>
+    public DetectionEngine Engine { get; set; } = DetectionEngine.Yolo;
 
-    /// <summary>YOLOv8 model exported to ONNX (see tools/yolo). Empty = models/chest-yolov8.onnx next to the app.</summary>
+    /// <summary>YOLOv8 model exported to ONNX (see tools/yolo). Empty = the bundled models/best.onnx next to the app.</summary>
     public string YoloModelPath { get; set; } = "";
 
     /// <summary>Minimum per-frame detection confidence for the YOLO model.</summary>
@@ -162,6 +163,12 @@ public sealed class DetectionSettings
 
     /// <summary>Draw boxes and chest states on the detection page preview.</summary>
     public bool DebugView { get; set; } = true;
+
+    /// <summary>
+    /// Writes YOLO tracking diagnostics to the log (state transitions, rejected detections, throttled). Off by default;
+    /// set "DiagnosticLog": true in settings.json (no UI). Counted openings are always logged.
+    /// </summary>
+    public bool DiagnosticLog { get; set; }
 
     // Region of interest (relative to the frame) where the chest burst appears.
     public double RoiWidth { get; set; } = 0.34;
@@ -223,7 +230,8 @@ public sealed class MultiplayerSettings
     public bool AutoShareMatches { get; set; } = true;
     public bool AutoJoinSharedMatches { get; set; } = true;
     public bool NotifyTeammateChests { get; set; } = true;
-    public bool TeammateSound { get; set; } = true;
+    /// <summary>No longer used: teammates' chests never play a sound (only the player who records a chest hears it). Kept so old settings files load.</summary>
+    public bool TeammateSound { get; set; }
     public bool OverlayTeamMode { get; set; }
     public bool OverlayShowActivity { get; set; } = true;
 }
@@ -318,7 +326,7 @@ public sealed class AppSettings
         Detection.YoloConfidence = double.IsFinite(Detection.YoloConfidence) ? Math.Clamp(Detection.YoloConfidence, 0.05, 0.95) : 0.35;
         if (!Enum.IsDefined(Detection.Engine))
         {
-            Detection.Engine = DetectionEngine.Heuristic;
+            Detection.Engine = DetectionEngine.Yolo;
         }
 
         Hotkeys.Bindings ??= [];

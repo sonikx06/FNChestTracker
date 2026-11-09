@@ -38,4 +38,12 @@
     <ProjectReference Include="..\ChestTracker.Vision\ChestTracker.Vision.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Bundled YOLOv8 chest model (closed_chest / open_chest). Published next to the executable as models\best.onnx. -->
+    <None Include="models\best.onnx" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <!-- DirectML runtime for GPU inference (Microsoft.AI.DirectML, a dependency of Microsoft.ML.OnnxRuntime.DirectML).
+         The package copies it only for C++ projects; without it Windows' older System32 copy would be used. -->
+    <None Include="$(NuGetPackageRoot)microsoft.ai.directml\1.15.2\bin\x64-win\DirectML.dll" Link="DirectML.dll"
+          CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Visible="false" />
+  </ItemGroup>
 </Project>

@@ -69,6 +69,8 @@ $common = @('-c', $Configuration, '--self-contained', 'true', '-p:DebugType=none
 Step 'Publishing desktop client (win-x64, self-contained)'
 Invoke-Dotnet (@('publish', (Join-Path $root 'src/ChestTracker.App'), '-r', 'win-x64', '-o', $clientDir) + $common)
 Copy-Item (Join-Path $root 'deploy/client/*') $clientDir
+$model = Join-Path $clientDir 'models/best.onnx'
+if (-not (Test-Path $model)) { throw "The chest model is missing from the client: $model (expected src/ChestTracker.App/models/best.onnx)." }
 
 # ------------------------------------------------------------------ 3. servers
 foreach ($target in @(@{ Rid = 'win-x64'; Dir = $winDir }, @{ Rid = 'linux-x64'; Dir = $linuxDir })) {

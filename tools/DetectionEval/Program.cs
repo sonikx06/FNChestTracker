@@ -5,14 +5,14 @@ using ChestTracker.Vision;
 using OpenCvSharp;
 
 // Evaluates a YOLOv8 chest model:
-//   video  --model m.onnx --video match.mp4 --events events.txt [--fps 8] [--tolerance 2] [--conf 0.35] [--csv out.csv]
+//   video  --model m.onnx --video match.mp4 [--events events.txt] [--fps 8] [--tolerance 2] [--conf 0.35] [--sensitivity 50] [--csv out.csv] [--trace frames.csv] [--dump dir]
 //   frames --model m.onnx --images dir --labels dir [--conf 0.25]
 CultureInfo.DefaultThreadCurrentCulture = CultureInfo.InvariantCulture;
 CultureInfo.CurrentCulture = CultureInfo.InvariantCulture;
 
 if (args.Length == 0 || args[0] is not ("video" or "frames"))
 {
-    Console.Error.WriteLine("usage: DetectionEval video --model m.onnx --video match.mp4 --events events.txt [--fps 8] [--tolerance 2] [--conf 0.35] [--csv out.csv]");
+    Console.Error.WriteLine("usage: DetectionEval video --model m.onnx --video match.mp4 [--events events.txt] [--fps 8] [--tolerance 2] [--conf 0.35] [--sensitivity 50] [--csv out.csv] [--trace frames.csv] [--dump dir]");
     Console.Error.WriteLine("       DetectionEval frames --model m.onnx --images dir --labels dir [--conf 0.25]");
     return 2;
 }
@@ -22,17 +22,31 @@ string Req(string key) => options.TryGetValue(key, out var v) ? v : throw new Ar
 double Num(string key, double fallback) => options.TryGetValue(key, out var v) ? double.Parse(v, CultureInfo.InvariantCulture) : fallback;
 
 using var detector = OnnxYoloDetector.Load(Req("model"), Environment.ProcessorCount);
-Console.WriteLine($"model: {detector.Info.Path} · {detector.Info.InputSize}px · classes: {string.Join(", ", detector.Labels.Names)} ({detector.Info.LabelSource})");
+Console.WriteLine($"model: {detector.Info.Path} · {detector.Info.InputSize}px · classes: {string.Join(", ", detector.Labels.Names)} ({detector.Info.LabelSource}) · {detector.Info.Provider}{(detector.Info.ProviderNote is { } n ? " (" + n + ")" : "")}");
 
 return args[0] == "video" ? EvaluateVideo() : EvaluateFrames();
 
 int EvaluateVideo()
 {
-    detector.ConfidenceThreshold = (float)Num("conf", 0.35);
-    var truth = DetectionMetrics.ParseEventTimes(File.ReadAllLines(Req("events")));
+    // Same tracker settings as the app (default sensitivity and confidence unless overridden).
+    var settings = new ChestTracker.Core.Settings.DetectionSettings
+    {
+        YoloConfidence = Num("conf", 0.35),
+        Sensitivity = (int)Num("sensitivity", 50),
+    };
+    detector.ConfidenceThreshold = (float)settings.YoloConfidence;
+    var truth = options.ContainsKey("events") ? DetectionMetrics.ParseEventTimes(File.ReadAllLines(Req("events"))) : [];
     var fps = Num("fps", 8);
     var tolerance = TimeSpan.FromSeconds(Num("tolerance", 2));
-    var pipeline = new YoloChestPipeline(detector, new ChestTrackingOptions { MinDetectionConfidence = detector.ConfidenceThreshold });
+    var tracking = YoloSettings.TrackingOptionsFor(settings);
+    if (options.ContainsKey("closed")) tracking = tracking with { MinClosedConfidence = (float)Num("closed", 0.4) };
+    if (options.ContainsKey("opened")) tracking = tracking with { MinOpenedConfidence = (float)Num("opened", 0.4) };
+    var pipeline = new YoloChestPipeline(detector, tracking);
+    options.TryGetValue("trace", out var tracePath);
+    options.TryGetValue("dump", out var dumpDir);
+    var trace = tracePath is null ? null : new StreamWriter(tracePath);
+    trace?.WriteLine("time_s,ms,detections,tracks");
+    if (dumpDir is not null) Directory.CreateDirectory(dumpDir);
 
     using var capture = new VideoCapture(Req("video"));
     if (!capture.IsOpened())
@@ -49,8 +63,11 @@ int EvaluateVideo()
     using var bgra = new Mat();
     var index = 0;
     var processed = 0;
-    double inferenceMs = 0;
+    var times = new List<double>();
     byte[] buffer = [];
+    var cpu = System.Diagnostics.Process.GetCurrentProcess();
+    var cpuStart = cpu.TotalProcessorTime;
+    var wall = System.Diagnostics.Stopwatch.StartNew();
     while (capture.Read(frame) && !frame.Empty())
     {
         if (index++ % step != 0)
@@ -68,25 +85,49 @@ int EvaluateVideo()
 
         Marshal.Copy(bgra.Data, buffer, 0, size);
         var result = pipeline.Process(buffer, bgra.Width, bgra.Height, bgra.Width * 4, origin + time);
-        inferenceMs += result.ElapsedMs;
+        times.Add(result.ElapsedMs);
         processed++;
+        trace?.WriteLine(string.Create(System.Globalization.CultureInfo.InvariantCulture,
+            $"{time.TotalSeconds:0.000},{result.ElapsedMs:0},\"{string.Join(" ", result.Detections.Where(d => d.IsChest).Select(d => $"{d.Label}:{d.Confidence:0.00}@{d.Box}"))}\",\"{string.Join(" ", result.Update.Tracks.Where(t => t.MissedFrames == 0).Select(t => $"#{t.Id}:{t.State}"))}\""));
         foreach (var ev in result.Update.Events)
         {
             events.Add((time, ev));
-            Console.WriteLine($"{Fmt(time)}  {ev.Outcome,-9} conf={ev.Confidence:0.00}  {ev.Evidence}");
+            Console.WriteLine($"{Fmt(time)}  {ev.Outcome,-9} conf={ev.Confidence:0.00}  box={ev.Box}  {ev.Evidence}");
+            if (dumpDir is not null)
+            {
+                using var shot = frame.Clone();
+                var r = new Rect((int)ev.Box.X1, (int)ev.Box.Y1, (int)ev.Box.Width, (int)ev.Box.Height);
+                Cv2.Rectangle(shot, r, new Scalar(0, 255, 0), 3);
+                Cv2.PutText(shot, $"{ev.Outcome} {ev.Confidence:0.00} t={Fmt(time)}", new Point(20, 40), HersheyFonts.HersheySimplex, 1.0, new Scalar(0, 255, 0), 2);
+                Cv2.ImWrite(Path.Combine(dumpDir, $"event_{time.TotalSeconds:000.0}.jpg"), shot);
+            }
         }
     }
 
+    trace?.Dispose();
+    var cpuUsed = (cpu.TotalProcessorTime - cpuStart).TotalSeconds;
     var counted = events.Where(e => e.Event.Outcome == DetectionOutcome.Confirmed).Select(e => e.Time).ToList();
     var withReview = events.Where(e => e.Event.Outcome != DetectionOutcome.Discarded).Select(e => e.Time).ToList();
-    var m = DetectionMetrics.EvaluateEvents(counted, truth, tolerance);
-    var mr = DetectionMetrics.EvaluateEvents(withReview, truth, tolerance);
 
     Console.WriteLine();
-    Console.WriteLine($"frames analysed: {processed} at {fps:0.#} fps · mean {inferenceMs / Math.Max(1, processed):0} ms/frame");
+    times.Sort();
+    Console.WriteLine($"frames analysed: {processed} at {fps:0.#} fps · {detector.Info.Provider} · inference mean {times.DefaultIfEmpty(0).Average():0.0} ms, p95 {(times.Count == 0 ? 0 : times[(int)(times.Count * 0.95)]):0.0} ms · process CPU {cpuUsed / wall.Elapsed.TotalSeconds / Environment.ProcessorCount:P0} of all cores while decoding+inferring");
+    Console.WriteLine($"events: {counted.Count} counted, {events.Count(e => e.Event.Outcome == DetectionOutcome.Uncertain)} review, {events.Count(e => e.Event.Outcome == DetectionOutcome.Discarded)} discarded");
+    if (truth.Count == 0 && !options.ContainsKey("events"))
+    {
+        return 0;
+    }
+
+    var m = DetectionMetrics.EvaluateEvents(counted, truth, tolerance);
+    var mr = DetectionMetrics.EvaluateEvents(withReview, truth, tolerance);
+    // Duplicates: further counted events within tolerance of an annotated opening that was already matched.
+    var duplicates = truth.Sum(t => Math.Max(0, counted.Count(c => (c - t).Duration() <= tolerance) - 1));
+    var latencies = truth.Select(t => counted.Where(c => c >= t - tolerance && c <= t + tolerance).Select(c => (c - t).TotalSeconds).DefaultIfEmpty(double.NaN).Min())
+        .Where(x => !double.IsNaN(x)).ToList();
     Console.WriteLine($"annotated openings: {truth.Count} · tolerance ±{tolerance.TotalSeconds:0.#} s");
-    Console.WriteLine($"counted automatically : TP {m.TruePositives}  FP {m.FalsePositives}  FN {m.FalseNegatives}  precision {m.Precision:P1}  recall {m.Recall:P1}");
+    Console.WriteLine($"counted automatically : TP {m.TruePositives}  FP {m.FalsePositives}  FN {m.FalseNegatives}  duplicates {duplicates}  precision {m.Precision:P1}  recall {m.Recall:P1}");
     Console.WriteLine($"counted + review queue: TP {mr.TruePositives}  FP {mr.FalsePositives}  FN {mr.FalseNegatives}  precision {mr.Precision:P1}  recall {mr.Recall:P1}");
+    if (latencies.Count > 0) Console.WriteLine($"latency (count time - annotated opening): mean {latencies.Average():0.00} s, max {latencies.Max():0.00} s");
     if (m.FalsePositiveTimes.Count > 0) Console.WriteLine("false positives at: " + string.Join(", ", m.FalsePositiveTimes.Select(Fmt)));
     if (m.MissedTimes.Count > 0) Console.WriteLine("missed openings at: " + string.Join(", ", m.MissedTimes.Select(Fmt)));
 

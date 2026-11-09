@@ -1,17 +1,8 @@
 using System.IO;
 using System.Media;
+using ChestTracker.Core.Tracking;
 
 namespace ChestTracker.App.Services;
-
-public enum SoundCue
-{
-    ChestAdded,
-    ChestRemoved,
-    MatchStarted,
-    MatchEnded,
-    Uncertain,
-    Teammate,
-}
 
 /// <summary>Short synthesized notification tones (no audio files, no extra dependencies).</summary>
 public sealed class SoundService : IDisposable
@@ -57,7 +48,6 @@ public sealed class SoundService : IDisposable
             SoundCue.ChestRemoved => [(659.25, 0.07), (493.88, 0.12)],
             SoundCue.MatchStarted => [(523.25, 0.08), (659.25, 0.08), (783.99, 0.14)],
             SoundCue.MatchEnded => [(783.99, 0.08), (659.25, 0.08), (523.25, 0.16)],
-            SoundCue.Teammate => [(698.46, 0.05), (880.0, 0.09)],
             _ => [(880, 0.06), (880, 0.06)],
         };
 

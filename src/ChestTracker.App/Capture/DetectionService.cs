@@ -34,9 +34,11 @@ public sealed class FrameAnalyzedEventArgs(FrameAnalysis analysis, double confid
 }
 
 /// <summary>
-/// EXPERIMENTAL. Runs capture → analysis → detector only while the tracking mode is
-/// automatic or hybrid. If capture is unsupported or fails, it reports the status and
-/// manual tracking keeps working untouched.
+/// Runs capture → analysis → detector only while the tracking mode is automatic or hybrid. Exactly one engine is
+/// active (YOLO by default, or the experimental heuristic), so two detectors can never count the same opening.
+/// YOLO frames go to a dedicated inference thread (latest frame wins, older ones are dropped), so neither the
+/// capture callback nor the UI thread ever waits for the model. If capture or the model fails, it reports the
+/// status and manual tracking keeps working untouched.
 /// </summary>
 public sealed class DetectionService : IDisposable
 {
@@ -55,7 +57,8 @@ public sealed class DetectionService : IDisposable
     private bool _disposed;
     private YoloChestPipeline? _yolo;
     private string? _yoloPath;
-    private int _busy;
+    private readonly InferenceWorker _worker;
+    private DateTimeOffset _nextRejectLog;
 
     public DetectionService(TrackingEngine engine, DetectionSettings settings, TrackingMode mode, string templatePath)
     {
@@ -73,6 +76,7 @@ public sealed class DetectionService : IDisposable
             Log.Warn("Could not load detection template", ex);
         }
 
+        _worker = new InferenceWorker(ProcessYolo);
         IsCaptureSupported = WgcCaptureSource.IsSupported();
         _watchdog = new Timer(_ => Watchdog(), null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(3));
     }
@@ -104,8 +108,24 @@ public sealed class DetectionService : IDisposable
 
     public bool UsesYolo => _settings.Engine == DetectionEngine.Yolo;
 
-    /// <summary>Model used when no path is configured.</summary>
-    public static string DefaultModelPath => Path.Combine(AppContext.BaseDirectory, "models", "chest-yolov8.onnx");
+    /// <summary>Capture rate while YOLO runs: enough frames to see a chest closed, then open, in consecutive frames.</summary>
+    public const double YoloSamplingFps = 8;
+
+    /// <summary>The model that ships with the app (published next to the executable).</summary>
+    public static string BundledModelPath => Path.Combine(AppContext.BaseDirectory, "models", "best.onnx");
+
+    /// <summary>Model used when no path is configured: the bundled one (or the older chest-yolov8.onnx name).</summary>
+    public static string DefaultModelPath
+    {
+        get
+        {
+            var legacy = Path.Combine(AppContext.BaseDirectory, "models", "chest-yolov8.onnx");
+            return !File.Exists(BundledModelPath) && File.Exists(legacy) ? legacy : BundledModelPath;
+        }
+    }
+
+    /// <summary>Last inference time (ms) of the YOLO pipeline, 0 when not running.</summary>
+    public double LastInferenceMs { get; private set; }
 
     public string? TargetDescription { get; private set; }
 
@@ -133,7 +153,7 @@ public sealed class DetectionService : IDisposable
             if (_yolo?.Detector is OnnxYoloDetector onnx)
             {
                 onnx.ConfidenceThreshold = (float)_settings.YoloConfidence;
-                _yolo.Tracker.Options = TrackingOptionsFor(_settings);
+                _yolo.Options = TrackingOptionsFor(_settings);
             }
         }
 
@@ -146,6 +166,7 @@ public sealed class DetectionService : IDisposable
     public void Restart()
     {
         StopCapture();
+        _worker.Clear();
         _detector.Reset();
         lock (_gate)
         {
@@ -183,10 +204,16 @@ public sealed class DetectionService : IDisposable
             detector.ConfidenceThreshold = (float)settings.YoloConfidence;
             _yolo = new YoloChestPipeline(detector, TrackingOptionsFor(settings));
             var info = detector.Info;
-            var chestClasses = info.Labels.Roles.Count(r => r is ObjectRole.ChestClosed or ObjectRole.ChestOpening or ObjectRole.ChestOpened);
-            ModelDescription = $"{Path.GetFileName(path)} · {info.InputSize} px · {info.Labels.Count} classes ({info.LabelSource})";
-            ModelError = chestClasses < 3
-                ? "The model has no chest_closed / chest_opening / chest_opened classes: nothing will be counted."
+            var roles = info.Labels.Roles;
+            ModelDescription = $"{Path.GetFileName(path)} · {info.InputSize} px · {info.Labels.Count} classes ({info.LabelSource}) · {info.Provider}"
+                               + (roles.Contains(ObjectRole.ChestOpening) ? "" : " · closed → open counts");
+            if (info.ProviderNote is { } note)
+            {
+                Log.Warn($"YOLO runs on the CPU. {note}");
+            }
+            // Counting needs the same chest seen closed and then opened; chest_opening is optional.
+            ModelError = !roles.Contains(ObjectRole.ChestClosed) || !roles.Contains(ObjectRole.ChestOpened)
+                ? $"The model needs chest_closed and chest_opened classes (has: {string.Join(", ", info.Labels.Names)}): nothing will be counted."
                 : null;
             Log.Info($"YOLO model loaded: {ModelDescription}; classes: {string.Join(", ", info.Labels.Names)}");
         }
@@ -198,16 +225,7 @@ public sealed class DetectionService : IDisposable
         }
     }
 
-    private static ChestTrackingOptions TrackingOptionsFor(DetectionSettings s)
-    {
-        var tuning = Tuning(s);
-        return new ChestTrackingOptions
-        {
-            MinDetectionConfidence = (float)s.YoloConfidence,
-            ConfirmThreshold = tuning.ConfirmThreshold,
-            ReviewThreshold = tuning.ReviewThreshold,
-        };
-    }
+    private static ChestTrackingOptions TrackingOptionsFor(DetectionSettings s) => YoloSettings.TrackingOptionsFor(s);
 
     public void RequestTemplateCapture() => _captureTemplateRequested = true;
 
@@ -281,7 +299,7 @@ public sealed class DetectionService : IDisposable
             source.Failed += OnSourceFailed;
             try
             {
-                source.Start(target, settings.SamplingFps);
+                source.Start(target, settings.Engine == DetectionEngine.Yolo ? Math.Max(settings.SamplingFps, YoloSamplingFps) : settings.SamplingFps);
             }
             catch (Exception ex)
             {
@@ -353,7 +371,8 @@ public sealed class DetectionService : IDisposable
 
             if (settings.Engine == DetectionEngine.Yolo)
             {
-                ProcessYolo(frame, settings);
+                // Copy and hand over: the capture buffer is reused, and inference must not block the capture thread.
+                _worker.Submit(frame);
                 return;
             }
 
@@ -382,31 +401,37 @@ public sealed class DetectionService : IDisposable
         }
     }
 
-    private void ProcessYolo(CapturedFrame frame, DetectionSettings settings)
+    /// <summary>Runs on the inference thread, one frame at a time.</summary>
+    private void ProcessYolo(CapturedFrame frame)
     {
-        // Inference can be slower than the capture rate: drop frames instead of queueing them.
-        if (Interlocked.Exchange(ref _busy, 1) == 1)
+        YoloChestPipeline? pipeline;
+        DetectionSettings settings;
+        lock (_gate)
+        {
+            pipeline = _yolo;
+            settings = _settings;
+            if (_source is null || settings.Engine != DetectionEngine.Yolo)
+            {
+                return;
+            }
+        }
+
+        if (pipeline is null)
         {
             return;
         }
 
         try
         {
-            YoloChestPipeline? pipeline;
-            lock (_gate)
-            {
-                pipeline = _yolo;
-            }
-
-            if (pipeline is null)
-            {
-                return;
-            }
-
             var result = pipeline.Process(frame.Pixels, frame.Width, frame.Height, frame.Stride, frame.Timestamp);
-            var tracks = result.Update.Tracks;
-            var best = tracks.Where(t => t.State is ChestState.Opening).Select(t => (double)t.LastConfidence).DefaultIfEmpty(0).Max();
-            var state = tracks.Any(t => t.State == ChestState.Opening) ? DetectorState.Candidate : DetectorState.Idle;
+            LastInferenceMs = result.ElapsedMs;
+
+            // "Candidate": a chest confirmed closed is now seen open, one more open frame will count it.
+            var watching = result.Update.Tracks
+                .Where(t => t.MissedFrames == 0 && t.State is ChestState.Closed or ChestState.Opening && t.LastRole != ObjectRole.ChestClosed)
+                .ToList();
+            var best = watching.Select(t => (double)t.LastConfidence).DefaultIfEmpty(0).Max();
+            var state = watching.Count > 0 ? DetectorState.Candidate : DetectorState.Idle;
             lock (_gate)
             {
                 if (_status is DetectionStatus.Running or DetectionStatus.Candidate)
@@ -415,19 +440,39 @@ public sealed class DetectionService : IDisposable
                 }
             }
 
+            if (settings.DiagnosticLog)
+            {
+                LogDiagnostics(result);
+            }
+
             var preview = PreviewRequested ? DebugPreview(frame, result, settings.DebugView) : null;
             var analysis = new FrameAnalysis(new FrameFeatures(frame.Timestamp, 0, 0, 0, null), preview, result.ElapsedMs, frame.Width, frame.Height);
             FrameAnalyzed?.Invoke(this, new FrameAnalyzedEventArgs(analysis, best, state, result));
 
             foreach (var ev in result.Update.Events)
             {
-                Log.Info($"YOLO opening {ev.Outcome} conf={ev.Confidence:0.00} box={ev.Box} {ev.Evidence}");
-                HandleDecision(ev.ToDecision(), settings, ev.Evidence.ToString());
+                Log.Info($"YOLO opening {ev.Outcome} conf={ev.Confidence:0.00} box={ev.Box} {ev.Evidence} ({result.ElapsedMs:0} ms/frame)");
+                HandleDecision(ev.ToDecision(), settings, ev.Evidence.ToString(), trackedIdentity: true);
             }
         }
-        finally
+        catch (Exception ex)
         {
-            Interlocked.Exchange(ref _busy, 0);
+            Log.Warn("YOLO frame analysis failed", ex);
+        }
+    }
+
+    /// <summary>Optional diagnostics: every state transition, rejected detections at most every 2 s.</summary>
+    private void LogDiagnostics(PipelineFrame result)
+    {
+        foreach (var t in result.Update.Transitions ?? [])
+        {
+            Log.Info($"YOLO track #{t.TrackId} {t.Transition.From} -> {t.Transition.To} ({t.Transition.Reason}) conf={t.Confidence:0.00} box={t.Box}");
+        }
+
+        if (result.Update.Rejected is { Count: > 0 } rejected && result.Timestamp >= _nextRejectLog)
+        {
+            _nextRejectLog = result.Timestamp.AddSeconds(2);
+            Log.Info("YOLO rejected: " + string.Join("; ", rejected.Take(5).Select(r => $"{r.Detection.Label} {r.Detection.Confidence:0.00} {r.Detection.Box}: {r.Reason}")));
         }
     }
 
@@ -476,31 +521,9 @@ public sealed class DetectionService : IDisposable
         return new PreviewImage(bytes, small.Width, small.Height);
     }
 
-    private void HandleDecision(DetectionDecision decision, DetectionSettings settings, string? detail = null)
+    private void HandleDecision(DetectionDecision decision, DetectionSettings settings, string? detail = null, bool trackedIdentity = false)
     {
-        string result;
-        if (decision.Outcome == DetectionOutcome.Discarded)
-        {
-            result = "discarded";
-        }
-        else if (settings.TestMode)
-        {
-            result = "test";
-        }
-        else if (decision.Outcome == DetectionOutcome.Confirmed)
-        {
-            var r = _engine.AddChestAutomatic(decision.Confidence, decision.Timestamp);
-            result = r.Applied ? "counted" : "suppressed";
-        }
-        else if (settings.QueueUncertain)
-        {
-            _engine.AddPendingReview(decision.Confidence, decision.Timestamp);
-            result = "review";
-        }
-        else
-        {
-            result = "discarded";
-        }
+        var result = DetectionCounting.Apply(_engine, decision, settings.TestMode, settings.QueueUncertain, trackedIdentity);
 
         if (decision.Outcome == DetectionOutcome.Confirmed)
         {
@@ -568,6 +591,7 @@ public sealed class DetectionService : IDisposable
         GoldValueMin = s.GoldValueMin, UseTemplate = s.UseTemplate, PromptX = s.PromptX, PromptY = s.PromptY,
         PromptWidth = s.PromptWidth, PromptHeight = s.PromptHeight,
         Engine = s.Engine, YoloModelPath = s.YoloModelPath, YoloConfidence = s.YoloConfidence, DebugView = s.DebugView,
+        DiagnosticLog = s.DiagnosticLog,
     };
 
     public void Dispose()
@@ -575,11 +599,118 @@ public sealed class DetectionService : IDisposable
         _disposed = true;
         _watchdog.Dispose();
         StopCapture();
+        _worker.Dispose();
         _analyzer.Dispose();
         lock (_gate)
         {
             _yolo?.Dispose();
             _yolo = null;
         }
+    }
+}
+
+/// <summary>
+/// Single background thread for model inference. <see cref="Submit"/> copies the frame into a pending slot and
+/// returns at once; if inference is still busy, a newer frame replaces the pending one (frames are dropped, never
+/// queued, so detection stays at most one frame behind).
+/// </summary>
+internal sealed class InferenceWorker : IDisposable
+{
+    private readonly Action<CapturedFrame> _process;
+    private readonly Thread _thread;
+    private readonly AutoResetEvent _signal = new(false);
+    private readonly object _gate = new();
+    private byte[] _pendingBuffer = [];
+    private byte[] _workBuffer = [];
+    private CapturedFrame? _pending;
+    private volatile bool _stopped;
+
+    public InferenceWorker(Action<CapturedFrame> process)
+    {
+        _process = process;
+        _thread = new Thread(Run) { IsBackground = true, Name = "YOLO inference", Priority = ThreadPriority.BelowNormal };
+        _thread.Start();
+    }
+
+    /// <summary>Frames replaced before they were processed (diagnostics).</summary>
+    public long Dropped { get; private set; }
+
+    public void Submit(CapturedFrame frame)
+    {
+        if (_stopped)
+        {
+            return;
+        }
+
+        var length = frame.Stride * frame.Height;
+        lock (_gate)
+        {
+            if (_pending is not null)
+            {
+                Dropped++;
+            }
+
+            if (_pendingBuffer.Length != length)
+            {
+                _pendingBuffer = new byte[length];
+            }
+
+            Buffer.BlockCopy(frame.Pixels, 0, _pendingBuffer, 0, Math.Min(length, frame.Pixels.Length));
+            _pending = new CapturedFrame
+            {
+                Pixels = _pendingBuffer, Width = frame.Width, Height = frame.Height, Stride = frame.Stride, Timestamp = frame.Timestamp,
+            };
+        }
+
+        _signal.Set();
+    }
+
+    public void Clear()
+    {
+        lock (_gate)
+        {
+            _pending = null;
+        }
+    }
+
+    private void Run()
+    {
+        while (!_stopped)
+        {
+            _signal.WaitOne();
+            CapturedFrame? frame;
+            lock (_gate)
+            {
+                frame = _pending;
+                _pending = null;
+                if (frame is not null)
+                {
+                    // Swap buffers: the next Submit writes into the other one while this frame is processed.
+                    (_pendingBuffer, _workBuffer) = (_workBuffer, _pendingBuffer);
+                }
+            }
+
+            if (frame is null || _stopped)
+            {
+                continue;
+            }
+
+            try
+            {
+                _process(frame);
+            }
+            catch (Exception ex)
+            {
+                Log.Warn("Inference worker failed", ex);
+            }
+        }
+    }
+
+    public void Dispose()
+    {
+        _stopped = true;
+        _signal.Set();
+        _thread.Join(TimeSpan.FromSeconds(2));
+        _signal.Dispose();
     }
 }

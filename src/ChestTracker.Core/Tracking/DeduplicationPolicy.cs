@@ -7,7 +7,9 @@ namespace ChestTracker.Core.Tracking;
 /// Rules:
 /// <list type="bullet">
 /// <item>Hotkey presses closer than <see cref="TrackingOptions.ManualDebounce"/> are ignored (accidental double press).</item>
-/// <item>Automatic detections closer than <see cref="TrackingOptions.AutomaticCooldown"/> are ignored (same animation seen twice).</item>
+/// <item>Automatic detections closer than <see cref="TrackingOptions.AutomaticCooldown"/> are ignored (same animation seen twice),
+/// except detections from a per-chest tracker (YOLO): each tracked chest counts once, so different chests opened in
+/// quick succession all count.</item>
 /// <item>Outside manual mode a hotkey add right after an automatic add (or an automatic add right after a manual add)
 /// within <see cref="TrackingOptions.HybridMergeWindow"/> is merged into one chest. The merge is consumed, so a
 /// second hotkey press counts normally.</item>
@@ -21,7 +23,9 @@ public sealed class DeduplicationPolicy
     public DateTimeOffset? LastRemoveHotkey { get; private set; }
     public DateTimeOffset? LastAutomaticAdd { get; private set; }
 
-    public TrackingResultCode CheckAdd(EventSource source, bool fromHotkey, TrackingMode mode, DateTimeOffset now, TrackingOptions options)
+    /// <param name="trackedIdentity">The automatic detection comes from a tracker that already guarantees one event per chest.</param>
+    public TrackingResultCode CheckAdd(EventSource source, bool fromHotkey, TrackingMode mode, DateTimeOffset now, TrackingOptions options,
+        bool trackedIdentity = false)
     {
         if (source == EventSource.Manual)
         {
@@ -46,7 +50,7 @@ public sealed class DeduplicationPolicy
             return TrackingResultCode.Applied;
         }
 
-        if (Within(LastAutomaticAdd, now, options.AutomaticCooldown))
+        if (!trackedIdentity && Within(LastAutomaticAdd, now, options.AutomaticCooldown))
         {
             return TrackingResultCode.IgnoredCooldown;
         }

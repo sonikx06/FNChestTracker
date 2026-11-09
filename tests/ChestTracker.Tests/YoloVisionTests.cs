@@ -62,16 +62,23 @@ public class YoloDecodingTests
         var lb = Letterbox.For(640, 640, 640);
         var data = Head(6,
             (0, 100, 100, 50, 50, 0, 0.90f),
-            (1, 102, 101, 50, 50, 1, 0.70f),  // same chest, other state: suppressed (class-agnostic NMS)
+            (1, 102, 101, 50, 50, 1, 0.70f),  // same chest, other class: kept (class-aware NMS), resolved by the tracker
+            (4, 101, 100, 50, 50, 0, 0.60f),  // same chest, same class: suppressed
             (2, 400, 400, 60, 40, 3, 0.80f),  // ammo box
             (3, 300, 300, 30, 30, 2, 0.10f)); // below threshold
         var dets = YoloDecoder.Decode(data, [1, 9, 6], Labels, lb, 0.25f, 0.45f);
 
-        Assert.Equal(2, dets.Count);
+        Assert.Equal(3, dets.Count);
         Assert.Equal(("chest_closed", ObjectRole.ChestClosed), (dets[0].Label, dets[0].Role));
         Assert.Equal(ObjectRole.OtherContainer, dets[1].Role);
         Assert.False(dets[1].IsChest);
+        Assert.Equal(ObjectRole.ChestOpening, dets[2].Role);
         Assert.Equal(new Box(75, 75, 125, 125), dets[0].Box);
+
+        // One chest, two states in one frame: the tracker keeps only the more confident one.
+        var update = new ChestTrackManager().Update(dets, DateTimeOffset.UnixEpoch);
+        Assert.Single(update.Tracks);
+        Assert.Contains(update.Rejected!, r => r.Detection.Role == ObjectRole.ChestOpening && r.Reason.Contains("same chest"));
     }
 
     [Fact]
@@ -168,7 +175,7 @@ public class ChestStateMachineTests
     public void Opening_seen_in_a_single_frame_is_not_enough()
     {
         var m = new ChestTrackManager();
-        var events = Run(m, F(D(ObjectRole.ChestClosed)), F(D(ObjectRole.ChestOpening)), F(D(ObjectRole.ChestOpened)), F(D(ObjectRole.ChestOpened)));
+        var events = Run(m, F(D(ObjectRole.ChestClosed)), F(D(ObjectRole.ChestClosed)), F(D(ObjectRole.ChestOpening)), F(D(ObjectRole.ChestOpened)), F(D(ObjectRole.ChestOpened)));
         // Closed → (1 opening frame) → opened: real transition but weak evidence → review only.
         var ev = Assert.Single(events);
         Assert.NotEqual(DetectionOutcome.Confirmed, ev.Outcome);
@@ -179,6 +186,47 @@ public class ChestStateMachineTests
     {
         var m = new ChestTrackManager();
         var ev = Assert.Single(Run(m, F(D(ObjectRole.ChestClosed)), F(D(ObjectRole.ChestClosed)),
+            F(D(ObjectRole.ChestOpened, 0.9f)), F(D(ObjectRole.ChestOpened, 0.9f))));
+        Assert.Equal(DetectionOutcome.Uncertain, ev.Outcome);
+    }
+
+    private sealed class FixedDetector(ModelLabels labels) : IObjectDetector
+    {
+        public ModelLabels Labels { get; } = labels;
+        public IReadOnlyList<Detection> Detect(ReadOnlySpan<byte> bgra, int width, int height, int stride) => [];
+        public void Dispose() { }
+    }
+
+    [Fact]
+    public void Two_class_model_counts_closed_then_opened_once_and_still_ignores_already_open_chests()
+    {
+        // e.g. a model trained with names {0: chest_closed, 1: chest_opened} and no opening class.
+        using var pipeline = new YoloChestPipeline(new FixedDetector(new ModelLabels(["chest_closed", "chest_opened"])));
+        Assert.False(pipeline.Options.ModelHasOpeningClass);
+        pipeline.Options = new ChestTrackingOptions();          // settings change keeps the model adaptation
+        Assert.False(pipeline.Options.ModelHasOpeningClass);
+        var m = pipeline.Tracker;
+
+        var ev = Assert.Single(Run(m, F(D(ObjectRole.ChestClosed)), F(D(ObjectRole.ChestClosed)),
+            F(D(ObjectRole.ChestOpened, 0.9f)), F(D(ObjectRole.ChestOpened, 0.8f)),
+            F(D(ObjectRole.ChestOpened)), F(D(ObjectRole.ChestOpened))));
+        Assert.Equal(DetectionOutcome.Confirmed, ev.Outcome);
+        Assert.Equal(0.85, ev.Confidence, 2);
+        Assert.Equal([ChestState.Closed, ChestState.Opened, ChestState.Counted], ev.Evidence.Transitions.Select(t => t.To));
+
+        var fresh = new YoloChestPipeline(new FixedDetector(new ModelLabels(["chest_closed", "chest_opened"]))).Tracker;
+        Assert.Empty(Run(fresh, Enumerable.Repeat(F(D(ObjectRole.ChestOpened, 0.95f)), 20).ToArray()));
+        Assert.Empty(Run(fresh, F(), F(), F()));
+        var single = new YoloChestPipeline(new FixedDetector(new ModelLabels(["chest_closed", "chest_opened"]))).Tracker;
+        Assert.Empty(Run(single, F(D(ObjectRole.ChestClosed)), F(D(ObjectRole.ChestOpened)))); // one open frame is not enough
+    }
+
+    [Fact]
+    public void Model_with_opening_class_keeps_closed_then_opened_as_review_only()
+    {
+        using var pipeline = new YoloChestPipeline(new FixedDetector(new ModelLabels(ModelLabels.Default)));
+        Assert.True(pipeline.Options.ModelHasOpeningClass);
+        var ev = Assert.Single(Run(pipeline.Tracker, F(D(ObjectRole.ChestClosed)), F(D(ObjectRole.ChestClosed)),
             F(D(ObjectRole.ChestOpened, 0.9f)), F(D(ObjectRole.ChestOpened, 0.9f))));
         Assert.Equal(DetectionOutcome.Uncertain, ev.Outcome);
     }
@@ -197,11 +245,16 @@ public class ChestStateMachineTests
     [Fact]
     public void Low_confidence_openings_are_discarded_and_medium_ones_reviewed()
     {
-        var low = Run(new ChestTrackManager(), F(D(ObjectRole.ChestClosed, 0.5f)),
+        var permissive = new ChestTrackingOptions { MinClosedConfidence = 0, MinOpenedConfidence = 0 };
+        var low = Run(new ChestTrackManager(permissive), F(D(ObjectRole.ChestClosed, 0.5f)), F(D(ObjectRole.ChestClosed, 0.5f)),
             F(D(ObjectRole.ChestOpening, 0.36f)), F(D(ObjectRole.ChestOpening, 0.36f)), F(D(ObjectRole.ChestOpened, 0.36f)), F(D(ObjectRole.ChestOpened, 0.36f)));
         Assert.Equal(DetectionOutcome.Discarded, Assert.Single(low).Outcome);
 
-        var mid = Run(new ChestTrackManager(), F(D(ObjectRole.ChestClosed)),
+        // With the default per-class floors (0.40) such weak detections are not used at all.
+        Assert.Empty(Run(new ChestTrackManager(), F(D(ObjectRole.ChestClosed, 0.5f)), F(D(ObjectRole.ChestClosed, 0.5f)),
+            F(D(ObjectRole.ChestOpening, 0.36f)), F(D(ObjectRole.ChestOpening, 0.36f)), F(D(ObjectRole.ChestOpened, 0.36f)), F(D(ObjectRole.ChestOpened, 0.36f))));
+
+        var mid = Run(new ChestTrackManager(), F(D(ObjectRole.ChestClosed)), F(D(ObjectRole.ChestClosed)),
             F(D(ObjectRole.ChestOpening, 0.5f)), F(D(ObjectRole.ChestOpening, 0.5f)), F(D(ObjectRole.ChestOpened, 0.5f)), F(D(ObjectRole.ChestOpened, 0.5f)));
         Assert.Equal(DetectionOutcome.Uncertain, Assert.Single(mid).Outcome);
     }
@@ -211,7 +264,7 @@ public class ChestStateMachineTests
     {
         var m = new ChestTrackManager();
         var events = Run(m,
-            F(D(ObjectRole.ChestClosed)), F(D(ObjectRole.ChestOpening)), F(D(ObjectRole.ChestOpening)),
+            F(D(ObjectRole.ChestClosed)), F(D(ObjectRole.ChestClosed)), F(D(ObjectRole.ChestOpening)), F(D(ObjectRole.ChestOpening)),
             F(D(ObjectRole.ChestClosed)), F(D(ObjectRole.ChestClosed)), F(D(ObjectRole.ChestClosed)), // walked away mid-search
             F(D(ObjectRole.ChestOpening)), F(D(ObjectRole.ChestOpening)), F(D(ObjectRole.ChestOpened)), F(D(ObjectRole.ChestOpened)));
         var ev = Assert.Single(events);
@@ -223,7 +276,7 @@ public class ChestStateMachineTests
     public void Lost_and_recreated_track_does_not_count_the_same_chest_twice()
     {
         var m = new ChestTrackManager(new ChestTrackingOptions { MaxMissedFrames = 1 });
-        var first = Run(m, F(D(ObjectRole.ChestClosed)), F(D(ObjectRole.ChestOpening)), F(D(ObjectRole.ChestOpening)),
+        var first = Run(m, F(D(ObjectRole.ChestClosed)), F(D(ObjectRole.ChestClosed)), F(D(ObjectRole.ChestOpening)), F(D(ObjectRole.ChestOpening)),
             F(D(ObjectRole.ChestOpened)), F(D(ObjectRole.ChestOpened)));
         Assert.Single(first);
 
@@ -247,6 +300,7 @@ public class ChestStateMachineTests
         var right = new Box(900, 400, 1000, 480);
         var m = new ChestTrackManager();
         var events = Run(m,
+            F(D(ObjectRole.ChestClosed, box: left), D(ObjectRole.ChestClosed, box: right)),
             F(D(ObjectRole.ChestClosed, box: left), D(ObjectRole.ChestClosed, box: right)),
             F(D(ObjectRole.ChestOpening, box: left), D(ObjectRole.ChestClosed, box: right)),
             F(D(ObjectRole.ChestOpening, box: left), D(ObjectRole.ChestClosed, box: right)),

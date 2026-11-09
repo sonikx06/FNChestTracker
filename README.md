@@ -23,7 +23,7 @@ The UI is in Russian by default and can be switched to English in Settings.
 | Statistics | Charts for chests per match, per day, per session, and a rolling plus cumulative average. Personal bests: best match, best day, best session, best pace. |
 | Settings | Hotkey rebinding (keyboard or Mouse4/Mouse5) with conflict detection (duplicate bindings, or keys already taken by another app). Global hotkey on/off switch. Overlay, tracking mode, detection sensitivity and cooldown, start with Windows, minimize/close to tray, sounds and volume, RU/EN language. |
 | Data safety | WAL journal with `synchronous=FULL`. Schema migrations through `PRAGMA user_version`, with a backup before each migration. A daily backup (the newest 14 are kept). At startup a corrupt database is quarantined and restored from the newest good backup. An unfinished match is resumed after a crash if it was active within the resume window; otherwise it is closed at its last activity. JSON export/import is idempotent. Statistics reset asks you to type a confirmation word and makes a backup first. |
-| Automatic mode (experimental) | See below. |
+| Automatic mode | YOLOv8 chest model included; see below. |
 
 ## Experimental automatic detection
 
@@ -56,24 +56,67 @@ rate, region of interest and the gold HSV range. You can also capture a prompt t
   keeps working unchanged.
 - Windows 11 may show a yellow capture border when the OS doesn't allow it to be hidden.
 
-### Experimental: YOLOv8 detection engine
+### YOLOv8 detection engine (default)
 
-**Detection → Detection engine → YOLOv8 model** replaces the gold-burst heuristic with a YOLOv8 object detector run
-locally with ONNX Runtime (CPU). **No trained model is included and no accuracy has been measured yet**: you need to
-label your own footage and train a model with `tools/yolo` (see `tools/yolo/README.md`). Without a model the engine
-shows "Model file not found" and manual tracking keeps working.
+**Detection → Detection engine → YOLOv8 model** is the default engine. Only one engine runs at a time, so the
+heuristic and the model can never both count the same opening.
 
-- Classes: `chest_closed`, `chest_opening`, `chest_opened`, plus `ammo_box` / `other_container` so other containers
-  are recognised and never counted.
-- Each chest is tracked across frames and goes through **Closed → Opening → Opened → Counted**. It counts only after
-  it was seen closed, then opening in at least 2 frames, then open in at least 2 frames. Closed → opened without a
-  captured opening frame only goes to the review queue. A chest that disappears is never counted, and a chest is
-  counted at most once (also when its track is lost and found again).
-- The detection log shows the evidence per opening (frames per state, mean confidences, state path), and the debug
-  view draws every box with its track id, state and confidence.
-- Wrong counts are corrected as before: −1 (undo) or reject in the review queue.
-- `tools/DetectionEval` measures precision, recall and false positives on your own recordings (annotated opening
-  times) and per-class detection metrics on labeled frames.
+**Model.** `best.onnx` ships with the app (`models\best.onnx` next to the executable; source:
+`src/ChestTracker.App/models/best.onnx`). It is an Ultralytics YOLOv8n export (8.4.208): input `images` float32
+[1, 3, 640, 640], output `output0` float32 [1, 6, 8400] (box + 2 class scores, no NMS in the model), classes
+`0: closed_chest` and `1: open_chest` read from the model's metadata. Leave the model path empty to use it, or pick
+another `.onnx` file.
+
+**Inference.** ONNX Runtime with DirectML: any DirectX 12 GPU (for example an RTX 2060) without installing CUDA. If the
+GPU cannot be initialised or fails its first inference, the CPU is used automatically (the model line on the Detection
+page shows which, and the log says why). One session is created per model and reused. Frames are captured at 8 FPS and
+handed to a separate inference thread; if inference is busy, the newest frame replaces the waiting one, so neither
+capture nor the UI ever waits for the model. Preprocessing: letterbox to 640 × 640 (gray 114 padding), BGRA → RGB,
+0..1, CHW; decoding: confidence threshold, class-aware NMS, boxes mapped back to screen pixels.
+
+**When a chest counts.** Each chest is tracked across frames:
+`UNKNOWN → CLOSED → OPENED → COUNTED`.
+- CLOSED: the chest was seen closed in at least 2 frames (closed detections ≥ 0.35).
+- OPENED → COUNTED: the same tracked chest is then seen open in 2 consecutive frames within 2 s (open detections
+  ≥ 0.40). That produces exactly one chest event; the chest is then marked counted and never counts again.
+- A chest seen open before it was confirmed closed (already looted, or first seen mid-animation) never counts, even if
+  the model later flickers to "closed" on it. Looking at a closed chest, or a chest disappearing, never counts.
+- Tracks follow chests through camera movement (IoU against the last and the motion-predicted box, then centre
+  distance for same-class detections when the match is unambiguous), survive up to 2 s / 8 frames of missed
+  detections, and are never handed from a closed chest to a different open chest (a closed → open change must be
+  seen in place). Two nearby chests stay separate; an ambiguous detection starts its own track.
+- A chest reported as closed and open in the same frame is one chest: the more confident state is used.
+- A re-created track at the place of a chest counted in the last 10 s is the same chest and is not counted again.
+- There is no global cooldown: different chests opened in quick succession each count.
+- Confidence of an opening (mean open-chest probability) ≥ 0.55 counts automatically, 0.40–0.55 goes to the review
+  queue (sensitivity 50; the sensitivity slider moves both).
+
+**Counting.** A confirmed opening is a normal automatic chest event (`TrackingEngine.AddChestAutomatic`): one event
+id, current match, lifetime, history, undo, outbox and party statistics like any other chest. In hybrid mode a hotkey
+press within the merge window (2.5 s) of a detected opening, in either order, counts once.
+
+**Diagnostics.** The detection log shows the evidence per opening and the debug view draws every box with its track
+id, state and confidence. For a detailed log set `"DiagnosticLog": true` in the `Detection` section of
+`settings.json`: state transitions, and rejected detections with the reason (at most every 2 s).
+
+**Measured on gameplay (November 2026, 8 Discord clips of ~30 s, 1080p, about 4 minutes).** Openings were annotated
+by hand from the footage; 4 complete chest openings (2 of them while spectating).
+`tools/DetectionEval video` with the app's settings: 4 found, 0 missed, 0 false positives, 0 duplicates, latency
+from the annotated opening to the count 0.3 s on average (max 0.8 s). A fifth opening at the very end of a clip
+(one open frame before the clip ended) could not be confirmed. RTX 2060 with DirectML: 12–25 ms per frame
+(p95 under 40 ms), about 10–16 % of all CPU cores including video decoding. This is a small sample from one
+player's footage: it is not a reliable accuracy figure.
+
+**Limitations.**
+- The model was trained on a small dataset. It also detects some backpacks, menu icons and loot as chests; the state
+  machine keeps these from counting in the footage above, but other skins, seasons, chest types and graphics
+  settings have not been tested. More labelled frames from real matches (different distances, angles, lighting,
+  chest types, HUD, scenes without chests) are the most effective improvement.
+- Openings by a player you are spectating are counted too.
+- An opening that the model sees only after the chest is already open (for example after looking away) is not counted.
+- Exclusive fullscreen may block capture; use borderless/windowed.
+- `tools/DetectionEval` measures counting on your own recordings (`video`, with annotated opening times) and per-class
+  detection metrics on labelled frames (`frames`); `tools/yolo` contains the training scripts.
 
 ## Multiplayer parties
 
@@ -92,6 +135,8 @@ in PostgreSQL.
    all time) and the shared-match history.
 5. **Overlay.** Switch it to the team layout (team total, your count, teammates' counts, online dots, recent activity)
    on the Party page, or with the optional "Overlay: personal / team" hotkey.
+   Teammates' chests update the counters and can show a notification, but play no sound: the chest sound plays only
+   on the computer of the player who recorded the chest (by hand or by detection).
 6. **Privacy controls:** hide your counts and/or activity, leave the party, sign out on this PC, or delete all of your
    server data. Local statistics are never touched by these actions.
 

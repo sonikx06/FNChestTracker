@@ -232,8 +232,13 @@ public sealed class TrackingEngine
     public TrackingResult AddChestManual(bool fromHotkey) =>
         AddChest(EventSource.Manual, null, null, fromHotkey, bypassDedup: false, matchId: null);
 
-    public TrackingResult AddChestAutomatic(double confidence, DateTimeOffset? detectedAt = null) =>
-        AddChest(EventSource.Automatic, Math.Clamp(confidence, 0, 1), detectedAt, fromHotkey: false, bypassDedup: false, matchId: null);
+    /// <param name="trackedIdentity">
+    /// True for the YOLO tracker, which emits at most one opening per tracked chest: the global automatic cooldown
+    /// (meant for the heuristic detector seeing one animation twice) is skipped, the manual/automatic merge is kept.
+    /// </param>
+    public TrackingResult AddChestAutomatic(double confidence, DateTimeOffset? detectedAt = null, bool trackedIdentity = false) =>
+        AddChest(EventSource.Automatic, Math.Clamp(confidence, 0, 1), detectedAt, fromHotkey: false, bypassDedup: false, matchId: null,
+            trackedIdentity);
 
     /// <summary>Removes the last chest of the current match by appending an undo event.</summary>
     public TrackingResult RemoveLastChest(bool fromHotkey)
@@ -518,7 +523,7 @@ public sealed class TrackingEngine
     }
 
     private TrackingResult AddChest(EventSource source, double? confidence, DateTimeOffset? at, bool fromHotkey,
-        bool bypassDedup, Guid? matchId)
+        bool bypassDedup, Guid? matchId, bool trackedIdentity = false)
     {
         ChestEvent ev;
         var startedMatch = false;
@@ -528,7 +533,7 @@ public sealed class TrackingEngine
             var now = _clock.UtcNow;
             if (!bypassDedup)
             {
-                var code = _dedup.CheckAdd(source, fromHotkey, _mode, now, _options);
+                var code = _dedup.CheckAdd(source, fromHotkey, _mode, now, _options, trackedIdentity);
                 if (code != TrackingResultCode.Applied)
                 {
                     return new TrackingResult(code);

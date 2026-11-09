@@ -318,7 +318,6 @@
                             <CheckBox Content="{DynamicResource Party.TeamOverlay}" IsChecked="{Binding Settings.OverlayTeamMode}" />
                             <CheckBox Content="{DynamicResource Party.ShowActivity}" IsChecked="{Binding Settings.OverlayShowActivity}" />
                             <CheckBox Content="{DynamicResource Party.Notify}" IsChecked="{Binding Settings.NotifyTeammateChests}" />
-                            <CheckBox Content="{DynamicResource Party.Sound}" IsChecked="{Binding Settings.TeammateSound}" />
                         </StackPanel>
                     </Border>
 

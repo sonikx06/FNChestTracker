@@ -17,6 +17,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private readonly Dispatcher _dispatcher;
     private readonly DispatcherTimer _clock;
     private readonly DispatcherTimer _toastTimer;
+    private readonly LocalSoundRouter _soundRouter;
 
     [ObservableProperty]
     private ObservableObject _currentPage;
@@ -43,6 +44,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     {
         Services = services;
         _dispatcher = Dispatcher.CurrentDispatcher;
+        _soundRouter = new LocalSoundRouter(cue => Services.Sounds.Play(cue));
         Snapshot = services.Engine.GetSnapshot();
 
         Settings = new SettingsViewModel(this);
@@ -96,11 +98,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         Overlay.ShowActivityMessage(text);
         if (m.NotifyTeammateChests && a.Delta > 0)
         {
+            // Visual only: a chest sound plays only on the computer that recorded the chest (LocalSoundRouter).
             ShowToast(text, ToastKind.Info);
-            if (m.TeammateSound)
-            {
-                Services.Sounds.Play(SoundCue.Teammate);
-            }
         }
     }
 
@@ -281,33 +280,22 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private void OnTrackingChanged(TrackingChangedEventArgs e)
     {
         ApplySnapshot(e.Snapshot, e);
+        _soundRouter.Handle(e);
 
         switch (e.Kind)
         {
             case TrackingChangeKind.ChestAdded:
-                Services.Sounds.Play(SoundCue.ChestAdded);
                 if (e.Event?.Source == EventSource.Automatic)
                 {
                     ShowToast(Loc.F("Toast.Detected", (e.Event.Confidence ?? 0).ToString("P0", Loc.Culture)), ToastKind.Success);
                 }
 
                 break;
-            case TrackingChangeKind.ChestRemoved:
-                Services.Sounds.Play(SoundCue.ChestRemoved);
-                break;
             case TrackingChangeKind.MatchStarted:
-                Services.Sounds.Play(SoundCue.MatchStarted);
                 ShowToast(Loc.T("Toast.MatchStarted"), ToastKind.Success);
                 break;
-            case TrackingChangeKind.MatchEnded:
-                Services.Sounds.Play(SoundCue.MatchEnded);
-                break;
             case TrackingChangeKind.ReviewAdded:
-                Services.Sounds.Play(SoundCue.Uncertain);
                 ShowToast(Loc.T("Toast.Uncertain"), ToastKind.Warning);
-                break;
-            case TrackingChangeKind.ReviewResolved when e.Event is not null:
-                Services.Sounds.Play(SoundCue.ChestAdded);
                 break;
         }
     }

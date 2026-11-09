@@ -497,8 +497,8 @@
     <s:String x:Key="Discord.NicknameSource.Default">Shown in Discord: {0} (default)</s:String>
     <s:String x:Key="Det.Engine">Detection engine</s:String>
     <s:String x:Key="Det.Engine.Heuristic">Heuristic (gold burst)</s:String>
-    <s:String x:Key="Det.Engine.Yolo">YOLOv8 model (experimental)</s:String>
-    <s:String x:Key="Det.YoloHint">Runs a YOLOv8 ONNX model locally. A chest is counted only after it was seen closed, then opening (several frames), then open. A chest that just disappears is never counted. No model is included: train one with tools/yolo.</s:String>
+    <s:String x:Key="Det.Engine.Yolo">YOLOv8 model (recommended)</s:String>
+    <s:String x:Key="Det.YoloHint">Runs the included YOLOv8 chest model locally (GPU when available, otherwise CPU). A chest counts once, only after the same chest was seen closed and then open in consecutive frames. Chests that are already open, or that just disappear, never count. Leave the path empty to use the included model.</s:String>
     <s:String x:Key="Det.ModelPath">Model file (.onnx)</s:String>
     <s:String x:Key="Det.ModelNotLoaded">Model not loaded yet</s:String>
     <s:String x:Key="Det.YoloConfidence">Minimum detection confidence</s:String>

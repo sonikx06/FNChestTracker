@@ -497,8 +497,8 @@
     <s:String x:Key="Discord.NicknameSource.Default">В Discord: {0} (по умолчанию)</s:String>
     <s:String x:Key="Det.Engine">Движок распознавания</s:String>
     <s:String x:Key="Det.Engine.Heuristic">Эвристика (золотая вспышка)</s:String>
-    <s:String x:Key="Det.Engine.Yolo">Модель YOLOv8 (экспериментально)</s:String>
-    <s:String x:Key="Det.YoloHint">Модель YOLOv8 в формате ONNX работает локально. Сундук засчитывается, только если он был виден закрытым, затем открывающимся (несколько кадров), затем открытым. Исчезновение сундука никогда не засчитывается. Модель не входит в комплект: обучите её с помощью tools/yolo.</s:String>
+    <s:String x:Key="Det.Engine.Yolo">Модель YOLOv8 (рекомендуется)</s:String>
+    <s:String x:Key="Det.YoloHint">Встроенная модель YOLOv8 работает локально (на видеокарте, если возможно, иначе на процессоре). Сундук засчитывается один раз и только если тот же сундук был виден закрытым, а затем открытым в нескольких кадрах подряд. Уже открытые и просто исчезнувшие сундуки не засчитываются. Оставьте путь пустым, чтобы использовать встроенную модель.</s:String>
     <s:String x:Key="Det.ModelPath">Файл модели (.onnx)</s:String>
     <s:String x:Key="Det.ModelNotLoaded">Модель ещё не загружена</s:String>
     <s:String x:Key="Det.YoloConfidence">Минимальная уверенность детекции</s:String>

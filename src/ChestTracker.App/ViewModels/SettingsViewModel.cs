@@ -448,12 +448,6 @@ public sealed partial class SettingsViewModel : ObservableObject
         set => Update(Model.Multiplayer.NotifyTeammateChests, value, v => Model.Multiplayer.NotifyTeammateChests = v, SettingsSection.Multiplayer);
     }
 
-    public bool TeammateSound
-    {
-        get => Model.Multiplayer.TeammateSound;
-        set => Update(Model.Multiplayer.TeammateSound, value, v => Model.Multiplayer.TeammateSound = v, SettingsSection.Multiplayer);
-    }
-
     public bool OverlayTeamMode
     {
         get => Model.Multiplayer.OverlayTeamMode;
@@ -734,7 +728,7 @@ public sealed partial class SettingsViewModel : ObservableObject
         var sounds = _main.Services.Sounds;
         var enabled = sounds.Enabled;
         sounds.Enabled = true;
-        sounds.Play(SoundCue.ChestAdded);
+        sounds.Play(Core.Tracking.SoundCue.ChestAdded);
         sounds.Enabled = enabled;
     }
 

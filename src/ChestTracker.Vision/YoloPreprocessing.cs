@@ -94,13 +94,33 @@ public static class YoloPreprocessing
 }
 
 /// <summary>
-/// Decodes the raw YOLOv8 detection head: [1, 4 + classes, anchors] (Ultralytics export, default) or the
-/// transposed [1, anchors, 4 + classes]. Boxes are (cx, cy, w, h) in input pixels; class scores are
-/// already sigmoid-activated. Applies a confidence threshold and class-agnostic NMS, so one chest yields one
-/// state (closed/opening/opened) per frame.
+/// Decodes the raw YOLOv8 detection head (export without NMS, end2end=False): [1, 4 + classes, anchors]
+/// (Ultralytics default, e.g. [1, 6, 8400] for 2 classes at 640 px) or the transposed [1, anchors, 4 + classes].
+/// Boxes are (cx, cy, w, h) in input pixels; class scores are already sigmoid-activated. Applies the confidence
+/// threshold and class-aware NMS; overlapping boxes of different chest classes are resolved by the tracker.
 /// </summary>
 public static class YoloDecoder
 {
+    /// <summary>Classes of a [1, a, b] head: the smaller of a and b is 4 + classes. -1 when the shape cannot tell.</summary>
+    public static int ClassCount(IReadOnlyList<int> dims) =>
+        dims.Count == 3 && dims[1] > 0 && dims[2] > 0 && dims[1] != dims[2] && Math.Min(dims[1], dims[2]) > 4
+            ? Math.Min(dims[1], dims[2]) - 4
+            : -1;
+
+    /// <summary>True when the head is [1, 4 + classes, anchors].</summary>
+    public static bool IsChannelsFirst(IReadOnlyList<int> shape, int labelCount)
+    {
+        var first = shape[1] == 4 + labelCount;
+        var second = shape[2] == 4 + labelCount;
+        if (first != second)
+        {
+            return first;
+        }
+
+        // Neither (or both) match the label count: anchors are always the larger dimension.
+        return shape[1] <= shape[2];
+    }
+
     public static List<Detection> Decode(ReadOnlySpan<float> output, int[] shape, ModelLabels labels, Letterbox letterbox,
         float confidenceThreshold, float iouThreshold, int maxDetections = 100)
     {
@@ -109,8 +129,7 @@ public static class YoloDecoder
             throw new ArgumentException($"Unexpected YOLO output shape [{string.Join(",", shape)}].", nameof(shape));
         }
 
-        // Channels-first when dim1 = 4 + classes (classes are few, anchors are thousands).
-        var channelsFirst = shape[1] == 4 + labels.Count || (shape[2] != 4 + labels.Count && shape[1] < shape[2]);
+        var channelsFirst = IsChannelsFirst(shape, labels.Count);
         var channels = channelsFirst ? shape[1] : shape[2];
         var anchors = channelsFirst ? shape[2] : shape[1];
         var classes = channels - 4;
@@ -155,6 +174,7 @@ public static class YoloDecoder
     private static float At(ReadOnlySpan<float> output, bool channelsFirst, int anchors, int channels, int anchor, int channel) =>
         channelsFirst ? output[(channel * anchors) + anchor] : output[(anchor * channels) + channel];
 
+    /// <summary>Class-aware NMS: a box only suppresses lower-scoring boxes of the same class.</summary>
     public static List<Detection> Nms(List<Detection> detections, float iouThreshold, int maxDetections = 100)
     {
         detections.Sort((a, b) => b.Confidence.CompareTo(a.Confidence));
@@ -166,7 +186,7 @@ public static class YoloDecoder
                 break;
             }
 
-            if (kept.All(k => k.Box.IoU(d.Box) < iouThreshold))
+            if (kept.All(k => k.ClassId != d.ClassId || k.Box.IoU(d.Box) < iouThreshold))
             {
                 kept.Add(d);
             }
