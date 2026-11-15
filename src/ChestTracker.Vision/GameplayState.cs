@@ -9,10 +9,10 @@ public enum GameplayState
     /// <summary>Not determined yet (match just started, or the screen check is unavailable). Nothing is counted.</summary>
     Unknown,
 
-    /// <summary>The player is in control: no spectator UI on screen. Automatic counting is allowed.</summary>
+    /// <summary>Local Start/control confirmation followed by a stable readable HUD without a spectator title.</summary>
     Playing,
 
-    /// <summary>Fortnite shows the "SPECTATING" banner: the player was eliminated and watches someone else.</summary>
+    /// <summary>Fortnite shows an English or Russian spectator title; automatic counting is blocked.</summary>
     Spectating,
 }
 
@@ -31,17 +31,26 @@ public interface ISpectatorProbe
 /// </summary>
 public static class SpectatorBanner
 {
-    /// <summary>Banner region as fractions of the frame: x 0.36–0.64, y 0–0.09 (title and player name).</summary>
+    /// <summary>Top-centre title band, excluding chat, menus and most of the watched player's name.</summary>
     public static (int X, int Y, int Width, int Height) Region(int width, int height)
     {
-        var x = (int)(width * 0.36);
-        var w = (int)(width * 0.28);
-        var h = Math.Max(1, (int)(height * 0.09));
+        var x = (int)(width * 0.25);
+        var w = (int)(width * 0.50);
+        var h = Math.Max(1, (int)(height * 0.045));
         return (x, 0, Math.Max(1, w), h);
     }
 
-    /// <summary>Banner titles. English is verified on footage; the others are best-effort for localised clients.</summary>
-    public static readonly IReadOnlyList<string> Titles = ["SPECTATING", "НАБЛЮДЕНИЕ", "ZUSCHAUEN", "ESPECTANDO", "SPECTATEUR", "OSSERVANDO"];
+    /// <summary>Russian title transcribed from the supplied 2026-11-15 gameplay screenshot; English from prior OCR fixtures.</summary>
+    public static readonly IReadOnlyList<string> Titles = ["SPECTATING", "РЕЖИМ ЗРИТЕЛЯ"];
+
+    /// <summary>Production OCR uses individual title lines, never a substring of a nickname or arbitrary screen text.</summary>
+    public static bool MatchesTitleLine(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return false;
+        var words = text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Select(Normalize).ToArray();
+        return (words.Length == 1 && words[0].Length >= 9 && Distance(words[0], "SPECTATING") <= 1)
+            || (words.Length == 2 && Distance(words[0], "РЕЖИМ") <= 1 && Distance(words[1], "ЗРИТЕЛЯ") <= 1);
+    }
 
     /// <summary>
     /// True when OCR text contains a banner title. Tolerates typical OCR slips (one or two wrong letters, I/l/1 and
@@ -53,6 +62,8 @@ public static class SpectatorBanner
         {
             return false;
         }
+
+        if (ocrText.Split(['\r', '\n']).Any(MatchesTitleLine)) return true;
 
         foreach (var raw in ocrText.Split([' ', '\n', '\r', '\t', '—', '-', ':', '|'], StringSplitOptions.RemoveEmptyEntries))
         {
@@ -129,9 +140,9 @@ public sealed record GameplayStateOptions
 }
 
 /// <summary>
-/// Turns per-frame banner checks into a stable <see cref="GameplayState"/>. Asymmetric on purpose: one sighting stops
-/// counting at once, returning to Playing needs a clean stretch of frames, so a missed OCR read during spectating
-/// never re-enables counting and brief HUD changes (menus, map, emotes) never switch it on by accident.
+/// Turns per-frame checks into a stable state. One sighting stops counting immediately. After spectator evidence
+/// or prolonged unavailable checks, the user must confirm regained control, followed by a clean stretch of frames.
+/// Missing title text alone never clears that latch. Starting a new local match is an explicit user action.
 /// </summary>
 public sealed class GameplayStateTracker(GameplayStateOptions? options = null)
 {
@@ -141,6 +152,18 @@ public sealed class GameplayStateTracker(GameplayStateOptions? options = null)
     private DateTimeOffset? _lastSighting;
     private DateTimeOffset? _firstClean;
     private DateTimeOffset? _lastCheck;
+    private bool _requiresControlConfirmation;
+
+    public bool RequiresControlConfirmation => _requiresControlConfirmation;
+
+    /// <summary>Explicit user confirmation after reboot/control recovery; never starts a local or shared match.</summary>
+    public void ConfirmLocalControl()
+    {
+        _requiresControlConfirmation = false;
+        State = GameplayState.Unknown;
+        _positives = _negatives = 0;
+        _lastSighting = _firstClean = _lastCheck = null;
+    }
 
     public GameplayState State { get; private set; } = GameplayState.Unknown;
 
@@ -153,6 +176,7 @@ public sealed class GameplayStateTracker(GameplayStateOptions? options = null)
             if (_lastCheck is { } last && time - last > _o.UnknownAfter && State == GameplayState.Playing)
             {
                 State = GameplayState.Unknown;
+                _requiresControlConfirmation = true;
                 _negatives = 0;
                 _firstClean = null;
             }
@@ -163,6 +187,7 @@ public sealed class GameplayStateTracker(GameplayStateOptions? options = null)
         _lastCheck = time;
         if (spectating.Value)
         {
+            _requiresControlConfirmation = true;
             _positives++;
             _negatives = 0;
             _firstClean = null;
@@ -178,7 +203,7 @@ public sealed class GameplayStateTracker(GameplayStateOptions? options = null)
             _negatives++;
             _firstClean ??= time;
             var cleanFor = time - (_lastSighting is { } s && s > _firstClean ? s : _firstClean.Value);
-            if (State != GameplayState.Playing && _negatives >= _o.PlayingAfter && cleanFor >= _o.PlayingAfterTime)
+            if (!_requiresControlConfirmation && State != GameplayState.Playing && _negatives >= _o.PlayingAfter && cleanFor >= _o.PlayingAfterTime)
             {
                 State = GameplayState.Playing;
             }
@@ -191,6 +216,7 @@ public sealed class GameplayStateTracker(GameplayStateOptions? options = null)
     public void Reset()
     {
         State = GameplayState.Unknown;
+        _requiresControlConfirmation = false;
         _positives = _negatives = 0;
         _lastSighting = _firstClean = _lastCheck = null;
     }

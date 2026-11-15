@@ -82,6 +82,11 @@
                                 </StackPanel>
                             </DockPanel>
                             <TextBlock Text="{Binding SourceText}" Style="{StaticResource Text.Caption}" Margin="20,4,0,0" />
+                            <StackPanel Margin="0,10" Visibility="{Binding RequiresControlConfirmation, Converter={StaticResource BoolToVis}}">
+                                <TextBlock Text="{DynamicResource Det.ResumeHint}" TextWrapping="Wrap" Style="{StaticResource Text.Caption}" />
+                                <Button Content="{DynamicResource Det.ConfirmControl}" Command="{Binding ConfirmLocalControlCommand}"
+                                        HorizontalAlignment="Left" Margin="0,6,0,0" />
+                            </StackPanel>
                             <TextBlock Text="{Binding ErrorText}" Foreground="{StaticResource Brush.Danger}" FontSize="12" TextWrapping="Wrap" Margin="20,4,0,0"
                                        Visibility="{Binding ErrorText, Converter={StaticResource NullToVis}}" />
 

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using ChestTracker.Core.Detection;
 using ChestTracker.Core.Tracking;
+using ChestTracker.Core.Models;
 
 namespace ChestTracker.Vision;
 
@@ -65,7 +66,22 @@ public sealed class MatchDetectionController : IDisposable
     /// <summary>A match is running and the player is playing: detected openings count.</summary>
     public bool IsCounting
     {
-        get { lock (_gate) return _match is not null && _gameplay.State == GameplayState.Playing; }
+        get { lock (_gate) return _match is not null && _engine.Mode != TrackingMode.Manual && _gameplay.State == GameplayState.Playing; }
+    }
+
+    public bool RequiresControlConfirmation { get { lock (_gate) return _match is not null && _gameplay.RequiresControlConfirmation; } }
+
+    public bool ConfirmLocalControl()
+    {
+        lock (_gate)
+        {
+            if (_match is null || _engine.Mode == TrackingMode.Manual || !_gameplay.RequiresControlConfirmation) return false;
+            _gameplay.ConfirmLocalControl();
+            _generation++;
+            _pipeline?.Reset();
+        }
+        GameplayChanged?.Invoke(this, GameplayState.Unknown);
+        return true;
     }
 
     public GameplayState GameplayState
@@ -104,7 +120,7 @@ public sealed class MatchDetectionController : IDisposable
     {
         lock (_gate)
         {
-            return _match is { } m && _pipeline is not null ? new FrameTicket(m, _generation) : null;
+            return _match is { } m && _engine.Mode != TrackingMode.Manual && _pipeline is not null ? new FrameTicket(m, _generation) : null;
         }
     }
 
@@ -119,7 +135,7 @@ public sealed class MatchDetectionController : IDisposable
         YoloChestPipeline? pipeline;
         lock (_gate)
         {
-            if (_match != ticket.MatchId)
+            if (!IsCurrent(ticket))
             {
                 return null;
             }
@@ -134,11 +150,18 @@ public sealed class MatchDetectionController : IDisposable
 
         // 1. Spectator check on this very frame, before the model sees it.
         bool? spectating = probe is { Available: true } ? probe.IsSpectating(bgra, width, height, stride) : null;
-        var changed = ObserveGameplay(spectating, timestamp, ticket.MatchId);
+        var changed = ObserveGameplay(spectating, timestamp, ticket.MatchId, ticket.Generation);
         GameplayState state;
         lock (_gate)
         {
             state = _gameplay.State;
+            if (spectating is null && IsCurrent(ticket))
+            {
+                // Unreadable HUD frames never contribute evidence to an opening, even inside the status debounce.
+                _generation++;
+                _pipeline?.Reset();
+                return new DetectionFrameResult(null, [], state, changed);
+            }
             if (state != GameplayState.Playing || !IsCurrent(ticket))
             {
                 // Not playing, or the state/match changed since capture: the frame is not counted.
@@ -160,20 +183,31 @@ public sealed class MatchDetectionController : IDisposable
             frame = pipeline.Track(detections, timestamp, sw.Elapsed.TotalMilliseconds);
         }
 
-        var applied = frame.Update.Events.Select(ev => new AppliedOpening(ev, apply(ev.ToDecision(), ticket.MatchId))).ToList();
-        return new DetectionFrameResult(frame, applied, state, changed);
+        lock (_gate)
+        {
+            // Keep generation validation and commit atomic with spectator/stop transitions.
+            if (!IsCurrent(ticket) || _gameplay.State != GameplayState.Playing) return null;
+            var applied = new List<AppliedOpening>();
+            foreach (var ev in frame.Update.Events)
+            {
+                // An apply callback can synchronously raise engine events, so check again between openings.
+                if (!IsCurrent(ticket) || _gameplay.State != GameplayState.Playing) break;
+                applied.Add(new AppliedOpening(ev, apply(ev.ToDecision(), ticket.MatchId)));
+            }
+            return new DetectionFrameResult(frame, applied, state, changed);
+        }
     }
 
     /// <summary>
     /// Feeds one spectator check (true / false / null = could not tell). A state change starts a new generation:
     /// tracks are cleared and frames already in flight are dropped. Ignored for a match that is no longer running.
     /// </summary>
-    public bool ObserveGameplay(bool? spectating, DateTimeOffset time, Guid? matchId = null)
+    public bool ObserveGameplay(bool? spectating, DateTimeOffset time, Guid? matchId = null, long? generation = null)
     {
         GameplayState now;
         lock (_gate)
         {
-            if (_match is null || (matchId is { } m && m != _match))
+            if (_match is null || (matchId is { } m && m != _match) || (generation is { } g && g != _generation))
             {
                 return false;
             }
@@ -186,16 +220,26 @@ public sealed class MatchDetectionController : IDisposable
             now = _gameplay.State;
             _generation++;
             _pipeline?.Reset();
+            if (now != GameplayState.Playing)
+            {
+                foreach (var review in _engine.GetPendingReviews().Where(r => r.MatchId == _match))
+                    _engine.ResolveReview(review.Id, accept: false);
+            }
         }
 
         GameplayChanged?.Invoke(this, now);
         return true;
     }
 
-    private bool IsCurrent(FrameTicket ticket) => _match == ticket.MatchId && _generation == ticket.Generation;
+    private bool IsCurrent(FrameTicket ticket) => _match == ticket.MatchId && _generation == ticket.Generation && _engine.Mode != TrackingMode.Manual;
 
     private void OnEngineChanged(object? sender, TrackingChangedEventArgs e)
     {
+        if (e.Kind == TrackingChangeKind.ModeChanged)
+        {
+            lock (_gate) { _generation++; _pipeline?.Reset(); }
+            return;
+        }
         if (e.Kind is not (TrackingChangeKind.Initialized or TrackingChangeKind.MatchStarted or TrackingChangeKind.MatchEnded
             or TrackingChangeKind.MatchDeleted or TrackingChangeKind.DataReset or TrackingChangeKind.DataImported))
         {

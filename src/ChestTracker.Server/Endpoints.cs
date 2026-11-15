@@ -113,8 +113,10 @@ public static class Endpoints
         api.MapGet("/parties/current/leaderboard", (LeaderboardPeriod period, int? tzOffsetMinutes, ClaimsPrincipal u, PartyService s) =>
             Run(() => s.GetLeaderboardAsync(Id(u), period, tzOffsetMinutes ?? 0)));
 
-        api.MapGet("/parties/current/matches", (int? limit, ClaimsPrincipal u, PartyService s) =>
-            Run(() => s.GetHistoryAsync(Id(u), limit ?? 20)));
+        api.MapGet("/parties/current/matches", (int? limit, int? offset, DateTimeOffset? from, DateTimeOffset? to, ClaimsPrincipal u, PartyService s) =>
+            Run(() => s.GetHistoryAsync(Id(u), limit ?? 20, offset ?? 0, from, to)));
+        api.MapGet("/parties/current/matches/summary", (DateTimeOffset? from, DateTimeOffset? to, ClaimsPrincipal u, PartyService s) =>
+            Run(() => s.GetMatchSummaryAsync(Id(u), from, to)));
 
         // ------------------------------------------------------------ administration
         var admin = app.MapGroup("/api/admin").AddEndpointFilter<AdminKeyFilter>().RequireRateLimiting("auth");

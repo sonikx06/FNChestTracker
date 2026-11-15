@@ -57,13 +57,19 @@ public sealed class LeaderboardItem(LeaderboardEntryDto e, bool isMe)
     public bool IsFirst { get; } = e.Rank == 1;
 }
 
-public sealed class SharedHistoryItem(SharedMatchHistoryDto h)
+public sealed partial class SharedHistoryItem(SharedMatchHistoryDto h, Guid? me) : ObservableObject
 {
-    public string StartText { get; } = h.StartedAt.ToLocalTime().ToString("dd.MM HH:mm", CultureInfo.InvariantCulture);
-    public string DurationText { get; } = h.EndedAt is { } e ? Loc.Duration(e - h.StartedAt) : Loc.T("Hist.Active");
-    public string TeamText { get; } = PartyMemberItem.Format(h.Team);
-    public string PlayersText { get; } = string.Join(", ",
-        h.Participants.Select(p => $"{p.DisplayName} {(p.Counts is { } c ? PartyMemberItem.Format(c) : "—")}"));
+    [ObservableProperty] private bool _isExpanded;
+    public Guid Id => h.Id;
+    public string Title => $"{h.StartedAt.ToLocalTime():dd.MM.yyyy HH:mm} · {h.PartyName} · {Loc.T(h.EndedAt is null ? "Hist.Active" : "Party.History.Completed")}";
+    public string Identifier => h.Id.ToString();
+    public string Timing => Loc.F("Party.History.Timing", h.StartedAt.ToLocalTime().ToString("g", Loc.Culture),
+        h.EndedAt?.ToLocalTime().ToString("g", Loc.Culture) ?? "—",
+        Loc.Duration((h.EndedAt ?? DateTimeOffset.UtcNow) - h.StartedAt));
+    public string Counts => Loc.F("Party.History.Counts", PartyMemberItem.Format(h.Team),
+        h.Participants.FirstOrDefault(p => p.PlayerId == me) is { } p ? PartyStatistics.Format(p.Counts) : "—", h.Participants.Count);
+    public IReadOnlyList<ParticipantStatsDto> Participants => h.Participants;
+    public string PlayersText => string.Join("\n", h.Participants.Select(p => $"{p.DisplayName}: {PartyStatistics.Format(p.Counts)}"));
 }
 
 /// <summary>Party page: account, party management, team counters, shared matches, leaderboards.</summary>
@@ -98,6 +104,13 @@ public sealed partial class PartyViewModel : ObservableObject
     [ObservableProperty] private LocalizedOption<LeaderboardPeriod> _selectedPeriod;
     [ObservableProperty] private bool _hasLeaderboard;
     [ObservableProperty] private bool _hasHistory;
+    [ObservableProperty] private LocalizedOption<LeaderboardPeriod> _selectedHistoryPeriod;
+    [ObservableProperty] private string _historySummary = "";
+    [ObservableProperty] private bool _hasNextHistory;
+    [ObservableProperty] private bool _hasPreviousHistory;
+    private int _historyOffset;
+    private long _remoteRevision;
+    private Guid? _historyParty;
 
     private bool _applyingSharing;
 
@@ -110,12 +123,13 @@ public sealed partial class PartyViewModel : ObservableObject
         _displayName = string.IsNullOrWhiteSpace(m.DisplayName) ? Environment.UserName : m.DisplayName;
         Periods = Enum.GetValues<LeaderboardPeriod>().Select(p => new LocalizedOption<LeaderboardPeriod>(p, "Party.Period." + p)).ToList();
         _selectedPeriod = Periods[0];
+        _selectedHistoryPeriod = Periods.Single(p => p.Value == LeaderboardPeriod.Lifetime);
         Sync.StateChanged += (_, _) => _dispatcher.BeginInvoke(() =>
         {
             Refresh();
             ScheduleRemoteRefresh();
         });
-        Loc.LanguageChanged += (_, _) => Refresh();
+        Loc.LanguageChanged += (_, _) => { Refresh(); _ = RefreshRemoteAsync(); };
         Refresh();
     }
 
@@ -159,6 +173,15 @@ public sealed partial class PartyViewModel : ObservableObject
         }
 
         var party = s.Party;
+        if (_historyParty != party?.PartyId)
+        {
+            _historyParty = party?.PartyId;
+            _remoteRevision++;
+            _historyOffset = 0;
+            History.Clear();
+            HistorySummary = "";
+            HasHistory = HasNextHistory = HasPreviousHistory = false;
+        }
         InParty = party is not null;
         IsOwner = s.IsOwner;
         Members.Clear();
@@ -207,33 +230,69 @@ public sealed partial class PartyViewModel : ObservableObject
 
     private async Task RefreshRemoteAsync()
     {
+        var revision = ++_remoteRevision;
         if (!InParty || Status != SyncStatus.Online)
         {
             Leaderboard.Clear();
             History.Clear();
             HasLeaderboard = HasHistory = false;
+            HistorySummary = "";
+            HasNextHistory = HasPreviousHistory = false;
             return;
         }
 
         try
         {
             var me = Sync.Account?.PlayerId;
+            var partyId = Sync.Party?.PartyId;
+            var date = DateTime.Today;
+            DateTimeOffset? from = SelectedHistoryPeriod.Value switch
+            {
+                LeaderboardPeriod.Day => new DateTimeOffset(date),
+                LeaderboardPeriod.Week => new DateTimeOffset(date.AddDays(-(((int)date.DayOfWeek + 6) % 7))),
+                _ => null,
+            };
             var board = await Sync.GetLeaderboardAsync(SelectedPeriod.Value);
-            var history = await Sync.GetHistoryAsync(10);
+            var history = await Sync.GetHistoryAsync(21, _historyOffset, from);
+            var summary = await Sync.GetMatchSummaryAsync(from);
+            if (revision != _remoteRevision || partyId != Sync.Party?.PartyId || me != Sync.Account?.PlayerId) return;
             Leaderboard.Clear();
             foreach (var e in board) Leaderboard.Add(new LeaderboardItem(e, e.PlayerId == me));
+            var expanded = History.Where(h => h.IsExpanded).Select(h => h.Id).ToHashSet();
             History.Clear();
-            foreach (var h in history) History.Add(new SharedHistoryItem(h));
+            foreach (var h in history.Take(20)) History.Add(new SharedHistoryItem(h, me) { IsExpanded = expanded.Contains(h.Id) });
+            HasNextHistory = history.Count > 20;
+            HasPreviousHistory = _historyOffset > 0;
+            HistorySummary = Loc.F("Party.History.Summary", summary.CompletedMatches,
+                FormatSummary(summary.Verified), FormatSummary(summary.Reported));
             HasLeaderboard = Leaderboard.Count > 0;
             HasHistory = History.Count > 0;
         }
         catch (Exception ex)
         {
+            if (revision != _remoteRevision) return;
+            History.Clear();
+            HasHistory = HasNextHistory = HasPreviousHistory = false;
+            HistorySummary = "";
             _main.ShowToast(Loc.F("Toast.Error", ex.Message), ToastKind.Error);
         }
     }
 
     partial void OnSelectedPeriodChanged(LocalizedOption<LeaderboardPeriod> value) => _ = RefreshRemoteAsync();
+
+    private static string FormatSummary(MatchCountSummary s) => Loc.F("Party.History.SummaryValues", s.Total, s.Average, s.Best);
+
+    partial void OnSelectedHistoryPeriodChanged(LocalizedOption<LeaderboardPeriod> value)
+    {
+        _historyOffset = 0;
+        _ = RefreshRemoteAsync();
+    }
+
+    [RelayCommand]
+    private async Task NextHistory() { if (HasNextHistory) { _historyOffset += 20; await RefreshRemoteAsync(); } }
+
+    [RelayCommand]
+    private async Task PreviousHistory() { if (HasPreviousHistory) { _historyOffset = Math.Max(0, _historyOffset - 20); await RefreshRemoteAsync(); } }
 
     partial void OnShareCountsChanged(bool value) => PushSharing();
 

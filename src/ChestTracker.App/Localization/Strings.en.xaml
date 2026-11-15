@@ -528,4 +528,17 @@
     <s:String x:Key="Discord.Assets.Ok">Logo and badges found in the Discord application ({0}).</s:String>
     <s:String x:Key="Discord.Assets.Missing">Missing art assets in the Discord application: {0}. Discord shows a “?” instead. Upload them under Developer Portal → Rich Presence → Art Assets with exactly these names.</s:String>
     <s:String x:Key="Discord.Assets.Unavailable">Could not check the logo and badges ({0}). The status still works; Discord loads the images itself.</s:String>
+    <s:String x:Key="Party.History.Basis" xml:space="preserve">Shared multiplayer matches · period uses match start time. Counts: verified (reported when different). Verification means server checks, not proof of an in-game opening. Hidden contributions are excluded. Active matches are excluded from the summary; personal history is on Match History.</s:String>
+    <s:String x:Key="Party.History.Completed" xml:space="preserve">Completed</s:String>
+    <s:String x:Key="Party.History.Timing" xml:space="preserve">Start: {0} · End: {1} · Duration: {2}</s:String>
+    <s:String x:Key="Party.History.Counts" xml:space="preserve">Team: {0} · You: {1} · Participants: {2}</s:String>
+    <s:String x:Key="Party.History.Summary" xml:space="preserve">Completed matches: {0}
+Verified: {1}
+Reported: {2}</s:String>
+    <s:String x:Key="Party.History.SummaryValues" xml:space="preserve">total {0}, average {1:0.##}, best {2}</s:String>
+    <s:String x:Key="Party.History.Previous" xml:space="preserve">Previous</s:String>
+    <s:String x:Key="Party.History.Next" xml:space="preserve">Next</s:String>
+    <s:String x:Key="Det.OcrLanguagesMissing">Automatic counting needs both English and Russian Windows OCR resources. Install both language OCR features in Windows language settings; counting stays paused until available.</s:String>
+    <s:String x:Key="Det.ResumeHint">The banner disappearing does not confirm local control. After you are back in control, confirm below. This keeps the same match and never overrides Stop.</s:String>
+    <s:String x:Key="Det.ConfirmControl">I am back in control</s:String>
 </ResourceDictionary>

@@ -94,7 +94,7 @@
                 </StackPanel>
 
                 <!-- Team -->
-                <StackPanel MinWidth="180" Visibility="{Binding IsTeamLayout, Converter={StaticResource BoolToVis}}">
+                <StackPanel MinWidth="300" Visibility="{Binding IsTeamLayout, Converter={StaticResource BoolToVis}}">
                     <DockPanel>
                         <TextBlock DockPanel.Dock="Right" Text="{Binding DurationText}" Style="{StaticResource OvLabel}" FontFamily="Consolas"
                                    Visibility="{Binding ShowTimer, Converter={StaticResource BoolToVis}}" />
@@ -123,18 +123,33 @@
                         </StackPanel>
                     </StackPanel>
                     <Rectangle Height="1" Fill="{Binding AccentBrush}" Opacity="0.35" Margin="0,0,0,4" />
-                    <ItemsControl ItemsSource="{Binding TeamMembers}">
+                    <!-- Bound the rows under SizeToContent: names take the remaining space, counts never resize it. -->
+                    <ItemsControl ItemsSource="{Binding TeamMembers}" Width="300" HorizontalAlignment="Left">
+                        <ItemsControl.ItemContainerStyle>
+                            <Style TargetType="ContentPresenter">
+                                <Setter Property="HorizontalAlignment" Value="Stretch" />
+                            </Style>
+                        </ItemsControl.ItemContainerStyle>
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
-                                <DockPanel Margin="0,1">
-                                    <TextBlock DockPanel.Dock="Right" Text="{Binding Count}" FontSize="14" FontWeight="Bold" Margin="12,0,0,0"
+                                <Grid Margin="0,1" MinHeight="22" HorizontalAlignment="Stretch">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="14" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="120" />
+                                    </Grid.ColumnDefinitions>
+                                    <Ellipse x:Name="Dot" Width="7" Height="7" Fill="#71717A" HorizontalAlignment="Left" VerticalAlignment="Center" />
+                                    <TextBlock x:Name="Name" Grid.Column="1" Text="{Binding Name}" ToolTip="{Binding Name}"
+                                               FontSize="12.5" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"
+                                               TextAlignment="Left" HorizontalAlignment="Stretch" VerticalAlignment="Center"
                                                Foreground="{Binding DataContext.TextBrush, RelativeSource={RelativeSource AncestorType=Window}}"
                                                Effect="{StaticResource TextShadow}" />
-                                    <Ellipse x:Name="Dot" Width="7" Height="7" Fill="#71717A" Margin="0,0,7,0" VerticalAlignment="Center" />
-                                    <TextBlock x:Name="Name" Text="{Binding Name}" FontSize="12.5" TextTrimming="CharacterEllipsis" MaxWidth="140"
+                                    <TextBlock Grid.Column="2" Text="{Binding Count}" FontSize="14" FontWeight="Bold" Margin="12,0,0,0"
+                                               TextWrapping="NoWrap"
+                                               TextAlignment="Right" HorizontalAlignment="Stretch" VerticalAlignment="Center"
                                                Foreground="{Binding DataContext.TextBrush, RelativeSource={RelativeSource AncestorType=Window}}"
                                                Effect="{StaticResource TextShadow}" />
-                                </DockPanel>
+                                </Grid>
                                 <DataTemplate.Triggers>
                                     <DataTrigger Binding="{Binding Online}" Value="True">
                                         <Setter TargetName="Dot" Property="Fill" Value="#22C55E" />

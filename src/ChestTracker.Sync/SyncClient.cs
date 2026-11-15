@@ -477,8 +477,16 @@ public sealed class SyncClient : IAsyncDisposable
         return SendAsync<List<LeaderboardEntryDto>>(HttpMethod.Get, $"api/parties/current/leaderboard?period={period}&tzOffsetMinutes={offset}");
     }
 
-    public Task<List<SharedMatchHistoryDto>> GetHistoryAsync(int limit = 20) =>
-        SendAsync<List<SharedMatchHistoryDto>>(HttpMethod.Get, $"api/parties/current/matches?limit={limit}");
+    public Task<List<SharedMatchHistoryDto>> GetHistoryAsync(int limit = 20, int offset = 0,
+        DateTimeOffset? from = null, DateTimeOffset? to = null) =>
+        SendAsync<List<SharedMatchHistoryDto>>(HttpMethod.Get, $"api/parties/current/matches?limit={limit}&offset={offset}{HistoryRange(from, to)}");
+
+    public Task<SharedMatchSummaryDto> GetMatchSummaryAsync(DateTimeOffset? from = null, DateTimeOffset? to = null) =>
+        SendAsync<SharedMatchSummaryDto>(HttpMethod.Get, $"api/parties/current/matches/summary?{HistoryRange(from, to)}");
+
+    private static string HistoryRange(DateTimeOffset? from, DateTimeOffset? to) =>
+        (from is { } f ? "&from=" + Uri.EscapeDataString(f.ToString("O")) : "") +
+        (to is { } t ? "&to=" + Uri.EscapeDataString(t.ToString("O")) : "");
 
     // ========================================================= shared matches
 

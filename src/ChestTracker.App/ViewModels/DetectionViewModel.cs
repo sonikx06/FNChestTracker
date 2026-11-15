@@ -73,6 +73,7 @@ public sealed partial class DetectionViewModel : ObservableObject, IDisposable
     public bool IsSupported => _main.Services.Detection.IsCaptureSupported;
 
     public bool IsActiveMode => _main.Services.Detection.IsActiveMode;
+    public bool RequiresControlConfirmation => _main.Services.Detection.RequiresControlConfirmation;
 
     public void SetActive(bool active)
     {
@@ -91,10 +92,12 @@ public sealed partial class DetectionViewModel : ObservableObject, IDisposable
         StatusText = Loc.T("Det.Status." + d.Status);
         IsRunning = d.Status is DetectionStatus.Running or DetectionStatus.Candidate or DetectionStatus.Detected;
         SourceText = d.TargetDescription ?? "";
-        ErrorText = d.Status is DetectionStatus.Error or DetectionStatus.Checking ? d.LastError : null;
+        ErrorText = d.OcrLanguagesMissing ? Loc.T("Det.OcrLanguagesMissing")
+            : d.Status is DetectionStatus.Error or DetectionStatus.Checking ? d.LastError : null;
         ModelText = d.ModelDescription ?? Loc.T("Det.ModelNotLoaded");
         ModelError = d.ModelError;
         OnPropertyChanged(nameof(IsActiveMode));
+        OnPropertyChanged(nameof(RequiresControlConfirmation));
         if (!IsRunning)
         {
             ConfidenceText = AnalysisText = "—";
@@ -104,6 +107,9 @@ public sealed partial class DetectionViewModel : ObservableObject, IDisposable
 
     [RelayCommand]
     private void Restart() => _main.Services.Detection.Restart();
+
+    [RelayCommand]
+    private void ConfirmLocalControl() => _main.Services.Detection.ConfirmLocalControl();
 
     [RelayCommand]
     private void ClearLog() => Log.Clear();

@@ -332,7 +332,9 @@ public sealed class PartyService(NpgsqlDataSource db, IOptions<ServerOptions> op
 
         await c.ExecAsync("""
             INSERT INTO shared_match_participants (match_id, player_id, response, responded_at) VALUES (@m, @p, @r, @t)
-            ON CONFLICT (match_id, player_id) DO UPDATE SET response = @r, responded_at = @t
+            ON CONFLICT (match_id, player_id) DO UPDATE
+            SET response = CASE WHEN shared_match_participants.response = 1 THEN 1 ELSE @r END,
+                responded_at = COALESCE(shared_match_participants.responded_at, @t)
             """, null, ("m", matchId), ("p", playerId), ("r", accept ? ParticipantResponse.Accepted : ParticipantResponse.Declined),
             ("t", clock.GetUtcNow()));
         return (m.PartyId, active);
@@ -418,11 +420,12 @@ public sealed class PartyService(NpgsqlDataSource db, IOptions<ServerOptions> op
             }
 
             // Undo target (validated below); an undo always belongs to the party of the chest it removes.
-            (Guid Player, short Kind, bool Verified, Guid Party) target = default;
+            (Guid Player, short Kind, bool Verified, Guid Party, Guid? Shared) target = default;
             if (e.Kind == EventKind.Undo)
             {
-                target = (await c.ListAsync("SELECT player_id, kind, verified, party_id FROM chest_events WHERE event_id = @id", tx,
-                    r => (r.GetGuid(0), r.GetInt16(1), r.GetBoolean(2), r.GetGuid(3)), ("id", e.UndoesEventId!.Value))).FirstOrDefault();
+                target = (await c.ListAsync("SELECT player_id, kind, verified, party_id, shared_match_id FROM chest_events WHERE event_id = @id", tx,
+                    r => (r.GetGuid(0), r.GetInt16(1), r.GetBoolean(2), r.GetGuid(3), r.IsDBNull(4) ? (Guid?)null : r.GetGuid(4)),
+                    ("id", e.UndoesEventId!.Value))).FirstOrDefault();
                 if (target.Player != Guid.Empty && (target.Player != playerId || target.Kind != (short)EventKind.Add))
                 {
                     acks.Add(new EventAck(e.EventId, AckStatus.Rejected, false, "invalid_undo_target"));
@@ -467,7 +470,8 @@ public sealed class PartyService(NpgsqlDataSource db, IOptions<ServerOptions> op
 
                 var matchGrace = TimeSpan.FromMinutes(O.SharedMatchGraceMinutes);
                 if (info is { } i && i.PartyId == pid && i.Participant
-                    && e.ClientTimestamp >= i.Start - matchGrace && e.ClientTimestamp <= (i.End ?? now) + matchGrace)
+                    && e.ClientTimestamp >= i.Start - matchGrace
+                    && (e.Kind == EventKind.Correction || e.ClientTimestamp <= (i.End ?? now) + matchGrace))
                 {
                     sharedMatchId = sid;
                 }
@@ -477,8 +481,23 @@ public sealed class PartyService(NpgsqlDataSource db, IOptions<ServerOptions> op
                 }
             }
 
+            // An undo changes the stored target's match, even after that match ended or if a client supplies
+            // a different match id. Membership/age/ownership and the unique undo constraint still apply.
+            if (e.Kind == EventKind.Undo && target.Player != Guid.Empty)
+            {
+                sharedMatchId = target.Shared;
+                flag = null;
+            }
+
             if (e.Kind == EventKind.Correction)
             {
+                if (e.SharedMatchId is not null && sharedMatchId is null)
+                {
+                    // A correction to an inaccessible/unrelated match must not become a lifetime-only delta
+                    // in the sender's current party (for example after switching parties).
+                    acks.Add(new EventAck(e.EventId, AckStatus.Rejected, false, "outside_shared_match"));
+                    continue;
+                }
                 verified = false;
                 flag = "manual_correction";
             }
@@ -597,24 +616,59 @@ public sealed class PartyService(NpgsqlDataSource db, IOptions<ServerOptions> op
         return result;
     }
 
-    public async Task<IReadOnlyList<SharedMatchHistoryDto>> GetHistoryAsync(Guid playerId, int limit)
+    public async Task<IReadOnlyList<SharedMatchHistoryDto>> GetHistoryAsync(Guid playerId, int limit, int offset = 0,
+        DateTimeOffset? from = null, DateTimeOffset? to = null)
     {
         await using var c = await db.OpenConnectionAsync();
-        var m = await RequireMemberAsync(c, null, playerId);
+        await using var tx = await c.BeginTransactionAsync(System.Data.IsolationLevel.RepeatableRead);
+        var m = await RequireMemberAsync(c, tx, playerId);
+        var name = await c.ScalarAsync<string>("SELECT name FROM parties WHERE id = @p", tx, ("p", m.PartyId));
         var matches = await c.ListAsync("""
             SELECT id, status, started_by, started_at, ended_at FROM shared_matches
-            WHERE party_id = @p ORDER BY started_at DESC LIMIT @n
-            """, null, ReadMatch, ("p", m.PartyId), ("n", Math.Clamp(limit, 1, 200)));
+            WHERE party_id = @p
+              AND (@from::timestamptz IS NULL OR started_at >= @from)
+              AND (@to::timestamptz IS NULL OR started_at < @to)
+            ORDER BY started_at DESC, id DESC LIMIT @n OFFSET @offset
+            """, tx, ReadMatch, ("p", m.PartyId), ("n", Math.Clamp(limit, 1, 200)),
+            ("offset", Math.Max(0, offset)), ("from", from), ("to", to));
 
         var result = new List<SharedMatchHistoryDto>();
         foreach (var match in matches)
         {
-            var participants = await GetParticipantStatsAsync(c, null, m.PartyId, match.Id);
+            var participants = await GetParticipantStatsAsync(c, tx, m.PartyId, match.Id);
             var team = new CountPair(participants.Sum(p => p.Counts?.Verified ?? 0), participants.Sum(p => p.Counts?.Reported ?? 0));
-            result.Add(new SharedMatchHistoryDto(match.Id, match.StartedAt, match.EndedAt, participants, team));
+            result.Add(new SharedMatchHistoryDto(match.Id, match.StartedAt, match.EndedAt, participants, team, name, match.Status));
         }
 
         return result;
+    }
+
+    public async Task<SharedMatchSummaryDto> GetMatchSummaryAsync(Guid playerId, DateTimeOffset? from = null, DateTimeOffset? to = null)
+    {
+        await using var c = await db.OpenConnectionAsync();
+        var m = await RequireMemberAsync(c, null, playerId);
+        // Same participants, visibility and count basis as GetParticipantStatsAsync. LEFT JOIN retains zero matches.
+        return (await c.ListAsync("""
+            WITH totals AS (
+                SELECT s.id,
+                       COALESCE(SUM(e.delta) FILTER (WHERE pm.share_counts AND e.verified AND e.kind IN (0, 1)), 0)::int AS v,
+                       COALESCE(SUM(e.delta) FILTER (WHERE pm.share_counts), 0)::int AS r
+                FROM shared_matches s
+                LEFT JOIN shared_match_participants sp ON sp.match_id = s.id AND sp.response = 1
+                LEFT JOIN party_members pm ON pm.party_id = s.party_id AND pm.player_id = sp.player_id
+                LEFT JOIN chest_events e ON e.shared_match_id = s.id AND e.player_id = sp.player_id
+                WHERE s.party_id = @p AND s.status = 2 AND s.ended_at IS NOT NULL
+                  AND (@from::timestamptz IS NULL OR s.started_at >= @from)
+                  AND (@to::timestamptz IS NULL OR s.started_at < @to)
+                GROUP BY s.id
+            )
+            SELECT COUNT(*)::int, COALESCE(SUM(v), 0)::bigint, COALESCE(AVG(v), 0)::double precision, COALESCE(MAX(v), 0),
+                   COALESCE(SUM(r), 0)::bigint, COALESCE(AVG(r), 0)::double precision, COALESCE(MAX(r), 0)
+            FROM totals
+            """, null, r => new SharedMatchSummaryDto(r.GetInt32(0),
+                new MatchCountSummary(r.GetInt64(1), r.GetDouble(2), r.GetInt32(3)),
+                new MatchCountSummary(r.GetInt64(4), r.GetDouble(5), r.GetInt32(6))),
+            ("p", m.PartyId), ("from", from), ("to", to))).Single();
     }
 
     // ================================================================ helpers

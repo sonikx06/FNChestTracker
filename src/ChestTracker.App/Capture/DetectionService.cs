@@ -135,6 +135,9 @@ public sealed class DetectionService : IDisposable
 
     /// <summary>Playing / Spectating / Unknown, from the spectator banner check.</summary>
     public GameplayState GameplayState => _controller.GameplayState;
+    public bool RequiresControlConfirmation => _controller.RequiresControlConfirmation && IsActiveMode;
+    public bool OcrLanguagesMissing => _probe is OcrSpectatorProbe { HasRequiredLanguages: false };
+    public void ConfirmLocalControl() => _controller.ConfirmLocalControl();
 
     /// <summary>Spectator view or unconfirmed screen state: automatic counting is paused until normal play is seen.</summary>
     private void OnGameplayChanged(GameplayState state)
@@ -357,8 +360,7 @@ public sealed class DetectionService : IDisposable
                 _target = target;
                 Interlocked.Exchange(ref _lastFrameTicks, Environment.TickCount64 * TimeSpan.TicksPerMillisecond);
                 TargetDescription = target.Description;
-                LastError = _probe.Available ? null
-                    : "Spectator check unavailable: Windows OCR (English) is not installed. Automatic counting stays paused; add English in Windows language settings.";
+                LastError = null; // Missing English/Russian OCR resources are explained through localization in the view model.
                 SetStatusLocked(StatusFor(_controller.GameplayState));
             }
         }

@@ -251,28 +251,37 @@
                     <!-- Shared match history -->
                     <Border Style="{StaticResource Section}">
                         <StackPanel>
-                            <TextBlock Text="{DynamicResource Party.History}" Style="{StaticResource Text.H2}" Margin="0,0,0,10" />
+                            <DockPanel Margin="0,0,0,10">
+                                <ComboBox DockPanel.Dock="Right" Width="150" ItemsSource="{Binding Periods}" SelectedItem="{Binding SelectedHistoryPeriod}" DisplayMemberPath="Label" />
+                                <TextBlock Text="{DynamicResource Party.History}" Style="{StaticResource Text.H2}" />
+                            </DockPanel>
+                            <TextBlock Text="{DynamicResource Party.History.Basis}" Style="{StaticResource Text.Caption}" TextWrapping="Wrap" />
+                            <TextBlock Text="{Binding HistorySummary}" Margin="0,8" TextWrapping="Wrap" />
                             <TextBlock Text="{DynamicResource Party.NoData}" Style="{StaticResource Text.Caption}"
                                        Visibility="{Binding HasHistory, Converter={StaticResource InvBoolToVis}}" />
                             <ItemsControl ItemsSource="{Binding History}">
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate DataType="{x:Type vm:SharedHistoryItem}">
-                                        <Grid Margin="0,5">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="100" />
-                                                <ColumnDefinition Width="80" />
-                                                <ColumnDefinition Width="60" />
-                                                <ColumnDefinition Width="*" />
-                                            </Grid.ColumnDefinitions>
-                                            <TextBlock Text="{Binding StartText}" FontFamily="Consolas" />
-                                            <TextBlock Grid.Column="1" Text="{Binding DurationText}" Foreground="{StaticResource Brush.TextMuted}" />
-                                            <TextBlock Grid.Column="2" Text="{Binding TeamText}" FontWeight="Bold" Foreground="{StaticResource Brush.AccentLight}" />
-                                            <TextBlock Grid.Column="3" Text="{Binding PlayersText}" Foreground="{StaticResource Brush.TextMuted}"
-                                                       TextTrimming="CharacterEllipsis" />
-                                        </Grid>
+                                        <Expander Margin="0,6" HorizontalContentAlignment="Stretch" IsExpanded="{Binding IsExpanded, Mode=TwoWay}">
+                                            <Expander.Header>
+                                                <StackPanel>
+                                                    <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                                    <TextBlock Text="{Binding Counts}" TextWrapping="Wrap" Foreground="{StaticResource Brush.AccentLight}" />
+                                                </StackPanel>
+                                            </Expander.Header>
+                                            <StackPanel Margin="20,6,0,8">
+                                                <TextBlock Text="{Binding Identifier}" Style="{StaticResource Text.Caption}" />
+                                                <TextBlock Text="{Binding Timing}" TextWrapping="Wrap" Margin="0,4" />
+                                                <TextBlock Text="{Binding PlayersText}" TextWrapping="Wrap" />
+                                            </StackPanel>
+                                        </Expander>
                                     </DataTemplate>
                                 </ItemsControl.ItemTemplate>
                             </ItemsControl>
+                            <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                <Button Content="{DynamicResource Party.History.Previous}" Command="{Binding PreviousHistoryCommand}" IsEnabled="{Binding HasPreviousHistory}" Margin="0,0,8,0" />
+                                <Button Content="{DynamicResource Party.History.Next}" Command="{Binding NextHistoryCommand}" IsEnabled="{Binding HasNextHistory}" />
+                            </StackPanel>
                         </StackPanel>
                     </Border>
                 </StackPanel>

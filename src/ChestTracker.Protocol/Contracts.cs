@@ -157,7 +157,13 @@ public sealed record SharedMatchHistoryDto(
     DateTimeOffset StartedAt,
     DateTimeOffset? EndedAt,
     IReadOnlyList<ParticipantStatsDto> Participants,
-    CountPair Team);
+    CountPair Team,
+    string? PartyName = null,
+    SharedMatchStatus? Status = null);
+
+/// <summary>Completed matches only, selected by start time. Verified and reported use the same match set.</summary>
+public sealed record SharedMatchSummaryDto(int CompletedMatches, MatchCountSummary Verified, MatchCountSummary Reported);
+public sealed record MatchCountSummary(long Total, double Average, int Best);
 
 // ----------------------------------------------------------------- REST bodies
 

@@ -123,17 +123,20 @@ How it decides:
 - each chest counts once, even if you keep looking at it;
 - nothing is counted outside a running match;
 - nothing is counted while you are **spectating**: when you are eliminated and watch a teammate, the app sees Fortnite's
-  "SPECTATING" banner and pauses, so your teammate's chests are not counted as yours. It resumes by itself when you are
-  back in play (for example after a reboot) or in your next match. A match is never started or ended by this.
+  "SPECTATING" or Russian "РЕЖИМ ЗРИТЕЛЯ" title and pauses, so your teammate's chests are not counted as yours.
+  The banner disappearing alone never resumes counting. After a reboot, confirm **I am back in control** on the
+  Automatic detection page to recheck the screen within the same match. A match is never started or ended by this,
+  and a manual Stop is never overridden.
 
 Detection quality depends on what is on screen: distance, lighting, effects, skins, chest types and graphics settings.
 The model was trained on a small dataset and checked on a few minutes of real gameplay, so it **will** miss some
 chests and can make mistakes. Use **Hybrid** mode if you want to fix those with hotkeys. The spectator check reads
-the banner with the text recognition built into Windows; it was checked on English-language Fortnite. If your game
-is in another language, or Windows has no English text recognition installed, the status stays at "Checking the game
-screen" and automatic counting stays paused (use manual counting, or add English under Windows **Settings → Time &
-language → Language**). If you want to help improve detection, recordings and labelled screenshots are welcome (see
-[CONTRIBUTING.md](CONTRIBUTING.md)).
+the title in a narrow top-centre screen region with Windows' English and Russian OCR engines, independently of the
+app's language. Both Windows OCR language features must be installed; if either is missing, automatic counting stays
+paused and the detection page explains why. The Russian title was checked against one supplied gameplay screenshot;
+English OCR and scaling also have synthetic tests. These checks are not a live-game accuracy guarantee. More labelled
+full-frame gameplay, especially reboots, unusual HUD scales and English spectator footage, is still needed.
+
 
 ## Multiplayer
 
@@ -162,6 +165,10 @@ Parties need a **server**. There is no public server: one person in your group r
 - In the overlay's team view: **TEAM · MATCH** is the shared match total (— when no shared match is running),
   **TEAM · TOTAL** is the party's all-time total (the same two numbers as on the Party page), and **ME · MATCH** is
   your own count in the current match.
+- **Party → Shared matches** shows paged multiplayer history separately from personal **Match history**. Choose today,
+  this week or all time (by match start time in your local timezone), then expand a match for times, duration, ID and
+  participants. Completed-match summaries include zero-chest matches and exclude active matches. Verified and reported
+  totals, averages and best results are shown separately; hidden contributions follow the existing sharing rules.
 - You can hide your counts from the party, leave, or delete your data from the server at any time. Your local
   statistics are never affected.
 
@@ -182,7 +189,7 @@ Parties need a **server**. There is no public server: one person in your group r
 | A hotkey does not work | **Settings → Hotkeys** shows each key's status: a key used by another program shows "Used by another application"; choose a different key. Make sure the global hotkey switch is on. In Automatic mode the chest keys are disabled on purpose. |
 | Multiplayer connection fails | Check the server address (including `http://` or `https://` and the port) with **Test server** on the Server page. The server's firewall must allow the port. "Incompatible version" means the app and the server need the same release. |
 | The overlay does not appear | Turn it on (switch at the bottom left, or F6) and run Fortnite in **Windowed Fullscreen**: windows cannot appear above exclusive fullscreen. If it is off-screen, press **Move** on the dashboard. |
-| Status "Checking the game screen — not counting yet" for a long time | The spectator check needs Windows' English text recognition. Add English in Windows **Settings → Time & language → Language** (the detection page shows a note when it is missing). It also needs Fortnite in English to recognise the banner. |
+| Status "Checking the game screen — not counting yet" for a long time | Install both English and Russian OCR features in Windows language settings. After spectating or a prolonged unavailable screen check, use **I am back in control** on the detection page only when you control your own character again. |
 | "Update failed" | The current version keeps working; the reason is shown and logged in `%LOCALAPPDATA%\FortniteChestTracker-Update\update.log`. You can always download the new ZIP by hand. If the app folder is not writable (for example inside `Program Files`), move it to your Documents folder. |
 | "The built-in chest model is missing / could not be loaded" | The `models` folder next to `FortniteChestTracker.exe` is missing or damaged. Download the ZIP again and extract it completely. Manual counting keeps working meanwhile. |
 

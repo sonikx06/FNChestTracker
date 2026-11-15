@@ -528,4 +528,17 @@
     <s:String x:Key="Discord.Assets.Ok">Логотип и значки найдены в приложении Discord ({0}).</s:String>
     <s:String x:Key="Discord.Assets.Missing">В приложении Discord нет изображений: {0}. Вместо них Discord показывает «?». Загрузите их в Developer Portal → Rich Presence → Art Assets точно с этими именами.</s:String>
     <s:String x:Key="Discord.Assets.Unavailable">Не удалось проверить логотип и значки ({0}). Статус всё равно работает: Discord загружает картинки сам.</s:String>
+    <s:String x:Key="Party.History.Basis" xml:space="preserve">Общие матчи · период по времени начала матча. Счёт: проверено (заявлено, если отличается). Проверка сервера не доказывает открытие сундука в игре. Скрытые вклады исключены. Активные матчи не входят в сводку; личные матчи — в «Истории матчей».</s:String>
+    <s:String x:Key="Party.History.Completed" xml:space="preserve">Завершён</s:String>
+    <s:String x:Key="Party.History.Timing" xml:space="preserve">Начало: {0} · Конец: {1} · Длительность: {2}</s:String>
+    <s:String x:Key="Party.History.Counts" xml:space="preserve">Команда: {0} · Вы: {1} · Участников: {2}</s:String>
+    <s:String x:Key="Party.History.Summary" xml:space="preserve">Завершённых матчей: {0}
+Проверено: {1}
+Заявлено: {2}</s:String>
+    <s:String x:Key="Party.History.SummaryValues" xml:space="preserve">всего {0}, в среднем {1:0.##}, лучший {2}</s:String>
+    <s:String x:Key="Party.History.Previous" xml:space="preserve">Назад</s:String>
+    <s:String x:Key="Party.History.Next" xml:space="preserve">Далее</s:String>
+    <s:String x:Key="Det.OcrLanguagesMissing">Для автоподсчёта нужны английский и русский модули распознавания текста Windows. Установите OCR для обоих языков в параметрах языка Windows; до этого подсчёт приостановлен.</s:String>
+    <s:String x:Key="Det.ResumeHint">Исчезновение надписи не подтверждает управление. Когда вы снова управляете персонажем, подтвердите это ниже. Матч останется тем же; остановленный счётчик не запустится.</s:String>
+    <s:String x:Key="Det.ConfirmControl">Я снова управляю персонажем</s:String>
 </ResourceDictionary>

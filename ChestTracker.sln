@@ -23,6 +23,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ChestTracker.Server.Tests",
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ChestTracker.Vision", "src\ChestTracker.Vision\ChestTracker.Vision.csproj", "{1B11A8C8-872D-4F33-86F3-E34A000B2D93}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ChestTracker.App.Tests", "tests\ChestTracker.App.Tests\ChestTracker.App.Tests.csproj", "{D32B4287-6876-4AA1-835A-03CD0A3AE4E5}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -61,6 +63,10 @@ Global
 		{1B11A8C8-872D-4F33-86F3-E34A000B2D93}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{1B11A8C8-872D-4F33-86F3-E34A000B2D93}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{1B11A8C8-872D-4F33-86F3-E34A000B2D93}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D32B4287-6876-4AA1-835A-03CD0A3AE4E5}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D32B4287-6876-4AA1-835A-03CD0A3AE4E5}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D32B4287-6876-4AA1-835A-03CD0A3AE4E5}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D32B4287-6876-4AA1-835A-03CD0A3AE4E5}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -74,5 +80,6 @@ Global
 		{1FA0203A-8903-468C-895A-D21F56AD6695} = {5C3E3B0A-1D2B-4E59-9F7A-0B8B9C1A2001}
 		{FCD2B31C-A956-42D8-8181-4915CFAFADB8} = {5C3E3B0A-1D2B-4E59-9F7A-0B8B9C1A2002}
 		{1B11A8C8-872D-4F33-86F3-E34A000B2D93} = {5C3E3B0A-1D2B-4E59-9F7A-0B8B9C1A2001}
+		{D32B4287-6876-4AA1-835A-03CD0A3AE4E5} = {5C3E3B0A-1D2B-4E59-9F7A-0B8B9C1A2002}
 	EndGlobalSection
 EndGlobal

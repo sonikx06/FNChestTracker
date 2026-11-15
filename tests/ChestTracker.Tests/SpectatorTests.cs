@@ -40,10 +40,35 @@ public class SpectatorTests : IDisposable
     [InlineData("CONTAINER OPENED")]
     public void Normal_hud_text_is_not_the_banner(string? ocr) => Assert.False(SpectatorBanner.Matches(ocr));
 
+    [Theory]
+    [InlineData("РЕЖИМ ЗРИТЕЛЯ", true)]
+    [InlineData("РЕЖИМ ЗРИТЕПЯ", true)]
+    [InlineData("SPECTATING", true)]
+    [InlineData("SPECTAT1NG", true)]
+    [InlineData("MySPECTATINGName", false)]
+    [InlineData("chat: РЕЖИМ ЗРИТЕЛЯ", false)]
+    [InlineData("НАБЛЮДЕНИЕ", false)]
+    [InlineData("SPECTACULAR", false)]
+    public void Only_title_lines_match(string text, bool expected) => Assert.Equal(expected, SpectatorBanner.MatchesTitleLine(text));
+
+    [Theory]
+    [InlineData(1280, 720)]
+    [InlineData(1920, 1080)]
+    [InlineData(2560, 1440)]
+    [InlineData(3840, 2160)]
+    public void Banner_crop_is_confined_to_top_centre(int width, int height)
+    {
+        var r = SpectatorBanner.Region(width, height);
+        Assert.Equal(width / 4, r.X);
+        Assert.Equal(0, r.Y);
+        Assert.True(r.Height <= height * .045);
+        Assert.Equal(width / 2, r.Width);
+    }
+
     // ------------------------------------------------------------------ state tracker
 
     [Fact]
-    public void One_banner_sighting_stops_counting_and_a_clean_stretch_restores_it()
+    public void One_banner_sighting_stops_counting_and_disappearance_requires_control_confirmation()
     {
         var t = new GameplayStateTracker();
         Assert.Equal(GameplayState.Unknown, t.State);
@@ -61,7 +86,10 @@ public class SpectatorTests : IDisposable
         Assert.Equal(GameplayState.Spectating, t.State);
 
         for (var i = 0; i < 17; i++) { time = time.AddMilliseconds(125); t.Observe(false, time); }
-        Assert.Equal(GameplayState.Playing, t.State);           // reboot / back in play after a clean 2 s
+        Assert.Equal(GameplayState.Spectating, t.State); // even a long absence is not proof of local control
+        t.ConfirmLocalControl();
+        for (var i = 0; i < 17; i++) { time = time.AddMilliseconds(125); t.Observe(false, time); }
+        Assert.Equal(GameplayState.Playing, t.State);
     }
 
     [Fact]
@@ -171,6 +199,7 @@ public class SpectatorTests : IDisposable
         Frames(engine, c, d, 3, () => [Closed()]);                            // a closed chest seen while spectating
         Assert.Equal(GameplayState.Spectating, c.GameplayState);
 
+        Assert.True(c.ConfirmLocalControl());                                 // explicit confirmation after reboot
         _probe.Spectating = false;                                            // rebooted / back in play
         Frames(engine, c, d, 2, () => [Open()]);                              // same spot already open: no stale Closed track
         Assert.Equal(0, AutoEvents());
@@ -198,6 +227,7 @@ public class SpectatorTests : IDisposable
         Assert.Null(Frame(engine, c, d, [Open()]));
         Assert.Equal(matches, engine.GetSnapshot().MatchesPlayed);
         Assert.Null(engine.CurrentMatch);
+        Assert.False(c.ConfirmLocalControl()); // manual Stop remains authoritative
     }
 
     [Fact]
@@ -225,6 +255,38 @@ public class SpectatorTests : IDisposable
         Frames(engine, c, d, 4, () => [Closed()]);
         Frames(engine, c, d, 4, () => [Open()]);
         Assert.Equal(GameplayState.Unknown, c.GameplayState);
+        Assert.Equal(0, AutoEvents());
+    }
+    [Fact]
+    public void Spectating_cancels_pending_reviews_and_mode_switch_invalidates_inflight_frames()
+    {
+        var (engine, c, d) = Setup();
+        engine.StartMatch();
+        Frames(engine, c, d, 4, () => [Closed()]);
+        var review = engine.AddPendingReview(.6);
+        c.ObserveGameplay(true, T0.AddSeconds(5));
+        Assert.Empty(engine.GetPendingReviews());
+        Assert.False(engine.ResolveReview(review!.Id, true).Applied);
+        Assert.True(c.ConfirmLocalControl());
+        _probe.Spectating = false;
+        Frames(engine, c, d, 4, () => [Closed()]);
+        Frame(engine, c, d, [Open()]);
+        d.DuringInference = () => { engine.SetMode(TrackingMode.Manual); engine.SetMode(TrackingMode.Automatic); };
+        Assert.Null(Frame(engine, c, d, [Open()]));
+        Assert.Equal(0, AutoEvents());
+    }
+
+    [Fact]
+    public void Unreadable_frame_never_completes_a_pending_opening()
+    {
+        var (engine, c, d) = Setup();
+        engine.StartMatch();
+        Frames(engine, c, d, 4, () => [Closed()]);
+        Frame(engine, c, d, [Open()]);
+        _probe.Spectating = null;
+        Frame(engine, c, d, [Open()]);
+        _probe.Spectating = false;
+        Frames(engine, c, d, 4, () => [Open()]);
         Assert.Equal(0, AutoEvents());
     }
 }
