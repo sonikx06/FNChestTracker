@@ -23,7 +23,7 @@ most chests.
 
 Open the newest release at the top of the [Releases page](https://github.com/sonikx06/FNChestTracker/releases) and,
 under **Assets**, download **`FortniteChestTracker-win-x64.zip`**
-([direct link for v1.2.0](https://github.com/sonikx06/FNChestTracker/releases/download/v1.2.0/FortniteChestTracker-win-x64.zip)). That is the complete app; you
+([direct link for v1.3.1](https://github.com/sonikx06/FNChestTracker/releases/download/v1.3.1/FortniteChestTracker-win-x64.zip)). That is the complete app; you
 do not need anything else. (The `Server` downloads are only for people who want to host a multiplayer server.)
 
 ## Screenshots
